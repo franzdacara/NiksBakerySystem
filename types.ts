@@ -36,10 +36,8 @@ export interface Shift {
   closingCash: number | null;
   production: ProductionEntry[];
   sales: SaleEntry[];
+  inventoryStart: Record<string, number>;
+  inventoryEnd: Record<string, number>;
 }
 
-export interface AIInsight {
-  summary: string;
-  suggestions: string[];
-  projectedWaste: string;
-}
+

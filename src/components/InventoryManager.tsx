@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Swal from 'sweetalert2';
 import { BakeryStore } from '../models/BakeryStore';
 import { BakeryItem } from '../../types';
 
@@ -120,9 +121,25 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ store }) => 
                         <i className="fas fa-plus-circle mr-2"></i> Add New Catalog Item
                     </button>
                     <button
-                        onClick={() => {
-                            if (confirm("Reset catalog to defaults? This will delete custom items.")) {
+                        onClick={async () => {
+                            const result = await Swal.fire({
+                                title: 'Reset Catalog?',
+                                text: 'This will delete all custom items and restore defaults.',
+                                icon: 'warning',
+                                showCancelButton: true,
+                                confirmButtonColor: '#dc2626',
+                                cancelButtonColor: '#78716c',
+                                confirmButtonText: 'Yes, Reset',
+                                cancelButtonText: 'Cancel'
+                            });
+                            if (result.isConfirmed) {
                                 store.resetCatalog();
+                                Swal.fire({
+                                    icon: 'success',
+                                    title: 'Catalog Reset',
+                                    text: 'Catalog has been restored to defaults',
+                                    confirmButtonColor: '#92400e'
+                                });
                             }
                         }}
                         className="text-stone-400 text-xs mt-4 hover:text-red-500 transition"

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Swal from 'sweetalert2';
 import { bakeryStore } from './src/models/BakeryStore';
 import { ShiftStatus } from './types';
 import { Login } from './src/components/Login';
@@ -117,21 +118,52 @@ const App: React.FC = () => {
               </button>
             ) : (
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (activeTab === 'sheet') {
                     // Step 2: Already on sheet, verify and close
-                    if (confirm("Have you verified the ending inventory counts? End Shift now?")) {
+                    const result = await Swal.fire({
+                      title: 'End Shift?',
+                      text: 'Have you verified the ending inventory counts?',
+                      icon: 'question',
+                      showCancelButton: true,
+                      confirmButtonColor: '#15803d',
+                      cancelButtonColor: '#78716c',
+                      confirmButtonText: 'Yes, End Shift',
+                      cancelButtonText: 'Cancel'
+                    });
+                    if (result.isConfirmed) {
                       // Generate PDF report before ending shift
                       generateShiftReport(store);
                       store.endShift(0);
                       setActiveTab('dashboard'); // Reset tab
+                      Swal.fire({
+                        icon: 'success',
+                        title: 'Shift Ended',
+                        text: 'PDF report has been downloaded',
+                        confirmButtonColor: '#92400e'
+                      });
                     }
                   } else {
                     // Step 1: Redirect to sheet and prefill
-                    if (confirm("Proceed to verify inventory?")) {
+                    const result = await Swal.fire({
+                      title: 'Verify Inventory',
+                      text: 'Proceed to verify ending inventory?',
+                      icon: 'question',
+                      showCancelButton: true,
+                      confirmButtonColor: '#92400e',
+                      cancelButtonColor: '#78716c',
+                      confirmButtonText: 'Yes, Proceed',
+                      cancelButtonText: 'Cancel'
+                    });
+                    if (result.isConfirmed) {
                       store.prefillEndingInventory();
                       setActiveTab('sheet');
-                      alert("System has pre-filled ending inventory based on sales. Please verify counts and click End Shift again.");
+                      Swal.fire({
+                        icon: 'info',
+                        title: 'Inventory Pre-filled',
+                        text: 'System has pre-filled ending inventory based on sales. Please verify counts and click End Shift again.',
+                        confirmButtonColor: '#92400e'
+                      });
                     }
                   }
                 }}

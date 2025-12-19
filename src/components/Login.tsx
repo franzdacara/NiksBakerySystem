@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Swal from 'sweetalert2';
 import { BakeryStore } from '../models/BakeryStore';
 
 interface LoginProps {
@@ -12,7 +13,12 @@ export const Login: React.FC<LoginProps> = ({ store }) => {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!store.login(username, password)) {
-            alert('Please enter credentials');
+            Swal.fire({
+                icon: 'error',
+                title: 'Login Failed',
+                text: 'Invalid username or password',
+                confirmButtonColor: '#92400e'
+            });
         }
     };
 

@@ -1,6 +1,12 @@
 
 import { BakeryItem } from './types';
 
+// Static credentials
+export const CREDENTIALS = {
+  username: 'nikko',
+  password: 'S2e3r3!@'
+};
+
 export const INITIAL_ITEMS: BakeryItem[] = [
   // Breads
   { id: '1', name: 'CHOCO BREAD', category: 'Bread', unit: 'pcs', costPrice: 2, sellingPrice: 5 },

@@ -1,5 +1,5 @@
 import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry } from '../../types';
-import { INITIAL_ITEMS } from '../../constants';
+import { INITIAL_ITEMS, CREDENTIALS } from '../../constants';
 
 // Simple event emitter for store updates
 type Listener = () => void;
@@ -57,7 +57,7 @@ export class BakeryStore {
 
     // Auth Actions
     login(username: string, password: string): boolean {
-        if ((username === 'admin' && password === 'bakery') || (username && password)) {
+        if (username === CREDENTIALS.username && password === CREDENTIALS.password) {
             this.isAuthenticated = true;
             this.notify();
             return true;

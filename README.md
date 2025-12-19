@@ -64,7 +64,7 @@ npm run preview
 ## Usage Guide
 
 ### Starting a Shift
-1. Log in with any username/password (default: admin/bakery)
+1. Log in with any username/password (default: nikko/S2e3r3!@)
 2. Click "Start New Shift" - inventory automatically carries over from previous shift
 
 ### Recording Production

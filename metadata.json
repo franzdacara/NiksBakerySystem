@@ -1,0 +1,7 @@
+{
+  "name": "Artisan Bakery Management System",
+  "description": "A comprehensive tool for bakeries to manage shift production, track inventory, record sales, and gain AI-driven insights into operational performance.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

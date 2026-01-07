@@ -36,6 +36,78 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ store }) => 
         store.addItem(newItem);
     };
 
+    const handleEditItem = async (item: BakeryItem) => {
+        const { value: formValues } = await Swal.fire({
+            title: 'Edit Item',
+            html: `
+                <div style="text-align: left;">
+                    <label style="display: block; margin-bottom: 4px; font-weight: 600;">Item Name</label>
+                    <input id="swal-name" class="swal2-input" placeholder="Item name" value="${item.name}" style="width: 100%; margin: 0 0 12px 0;">
+                    
+                    <label style="display: block; margin-bottom: 4px; font-weight: 600;">Category</label>
+                    <select id="swal-category" class="swal2-select" style="width: 100%; margin: 0 0 12px 0; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;">
+                        <option value="Bread" ${item.category === 'Bread' ? 'selected' : ''}>Bread</option>
+                        <option value="Pastry" ${item.category === 'Pastry' ? 'selected' : ''}>Pastry</option>
+                        <option value="Cake" ${item.category === 'Cake' ? 'selected' : ''}>Cake</option>
+                        <option value="Beverage" ${item.category === 'Beverage' ? 'selected' : ''}>Beverage</option>
+                        <option value="Coffee" ${item.category === 'Coffee' ? 'selected' : ''}>Coffee</option>
+                    </select>
+                    
+                    <label style="display: block; margin-bottom: 4px; font-weight: 600;">Cost Price (₱)</label>
+                    <input id="swal-cost" type="number" step="0.01" class="swal2-input" placeholder="Cost price" value="${item.costPrice}" style="width: 100%; margin: 0 0 12px 0;">
+                    
+                    <label style="display: block; margin-bottom: 4px; font-weight: 600;">Selling Price (₱)</label>
+                    <input id="swal-sell" type="number" step="0.01" class="swal2-input" placeholder="Selling price" value="${item.sellingPrice}" style="width: 100%; margin: 0;">
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            confirmButtonText: 'Save Changes',
+            confirmButtonColor: '#92400e',
+            cancelButtonColor: '#78716c',
+            preConfirm: () => {
+                const name = (document.getElementById('swal-name') as HTMLInputElement).value;
+                const category = (document.getElementById('swal-category') as HTMLSelectElement).value;
+                const costPrice = parseFloat((document.getElementById('swal-cost') as HTMLInputElement).value);
+                const sellingPrice = parseFloat((document.getElementById('swal-sell') as HTMLInputElement).value);
+
+                if (!name) {
+                    Swal.showValidationMessage('Please enter an item name');
+                    return false;
+                }
+                if (isNaN(costPrice) || costPrice < 0) {
+                    Swal.showValidationMessage('Please enter a valid cost price');
+                    return false;
+                }
+                if (isNaN(sellingPrice) || sellingPrice < 0) {
+                    Swal.showValidationMessage('Please enter a valid selling price');
+                    return false;
+                }
+
+                return { name, category, costPrice, sellingPrice };
+            }
+        });
+
+        if (formValues) {
+            const updatedItem: BakeryItem = {
+                ...item,
+                name: formValues.name,
+                category: formValues.category as BakeryItem['category'],
+                costPrice: formValues.costPrice,
+                sellingPrice: formValues.sellingPrice
+            };
+            store.updateItem(updatedItem);
+            Swal.fire({
+                icon: 'success',
+                title: 'Item Updated',
+                text: `${formValues.name} has been updated successfully`,
+                confirmButtonColor: '#92400e',
+                timer: 1500,
+                showConfirmButton: false
+            });
+        }
+    };
+
     return (
         <div className="animate-in slide-in-from-bottom-4 duration-500">
             <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
@@ -97,7 +169,10 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ store }) => 
                                 <td className="px-6 py-4 text-stone-600">₱{item.costPrice.toFixed(2)}</td>
                                 <td className="px-6 py-4 text-stone-800 font-semibold">₱{item.sellingPrice.toFixed(2)}</td>
                                 <td className="px-6 py-4 text-center">
-                                    <button className="text-stone-400 hover:text-amber-700 mx-2">
+                                    <button
+                                        onClick={() => handleEditItem(item)}
+                                        className="text-stone-400 hover:text-amber-700 mx-2"
+                                    >
                                         <i className="fas fa-edit"></i>
                                     </button>
                                 </td>

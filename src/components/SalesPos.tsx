@@ -7,6 +7,15 @@ interface SalesPosProps {
 }
 
 export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
+    const [, forceUpdate] = useState(0);
+
+    // Subscribe to store updates
+    useEffect(() => {
+        return store.subscribe(() => {
+            forceUpdate(n => n + 1);
+        });
+    }, [store]);
+
     const { shift, items, items: allItems, totalRevenue } = store;
 
     // Filter state
@@ -151,11 +160,10 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
                                     key={item.id}
                                     onClick={() => handleItemClick(item)}
                                     disabled={shift.status === ShiftStatus.CLOSED || isOutOfStock}
-                                    className={`flex flex-col items-center justify-center p-4 border rounded-xl transition-all active:scale-95 group aspect-[4/3] ${
-                                        isOutOfStock 
-                                            ? 'bg-stone-100 border-stone-200 opacity-50 cursor-not-allowed' 
-                                            : 'bg-stone-50 border-stone-200 hover:bg-amber-50 hover:border-amber-300 disabled:opacity-50'
-                                    }`}
+                                    className={`flex flex-col items-center justify-center p-4 border rounded-xl transition-all active:scale-95 group aspect-[4/3] ${isOutOfStock
+                                        ? 'bg-stone-100 border-stone-200 opacity-50 cursor-not-allowed'
+                                        : 'bg-stone-50 border-stone-200 hover:bg-amber-50 hover:border-amber-300 disabled:opacity-50'
+                                        }`}
                                 >
                                     <span className={`text-sm font-bold text-center mb-1 line-clamp-2 ${isOutOfStock ? 'text-stone-400' : 'text-stone-700 group-hover:text-amber-900'}`}>{item.name}</span>
                                     <span className="text-amber-600 font-bold text-xs bg-amber-100/50 px-2 py-0.5 rounded-md">₱{item.sellingPrice.toFixed(2)}</span>
@@ -212,7 +220,7 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
                 <div className="p-6 border-t border-stone-100 bg-stone-50">
                     <div className="flex justify-between items-center mb-2">
                         <span className="text-stone-500 font-bold uppercase text-xs tracking-wider">Total Revenue</span>
-                        <span className="text-2xl font-bold text-stone-900">₱{totalRevenue.toFixed(2)}</span>
+                        <span className="text-2xl font-bold text-stone-900">₱{aggregatedSales.reduce((acc, item) => acc + item.amount, 0).toFixed(2)}</span>
                     </div>
                 </div>
             </div>
@@ -240,8 +248,8 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
                                 value={qtyInput}
                                 onChange={e => {
                                     const val = parseInt(e.target.value) || 0;
-                                    const maxQty = mode === 'ADD' 
-                                        ? getAvailableQty(selectedItem.id) 
+                                    const maxQty = mode === 'ADD'
+                                        ? getAvailableQty(selectedItem.id)
                                         : getAvailableQty(selectedItem.id) + (aggregatedSales.find(s => s.id === selectedItem.id)?.qty || 0);
                                     if (val <= maxQty) {
                                         setQtyInput(e.target.value);

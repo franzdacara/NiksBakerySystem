@@ -7,7 +7,7 @@ export enum ShiftStatus {
 export interface BakeryItem {
   id: string;
   name: string;
-  category: 'Bread' | 'Pastry' | 'Cake' | 'Beverage';
+  category: 'Bread' | 'Pastry' | 'Cake' | 'Beverage' | 'Coffee';
   unit: string;
   costPrice: number;
   sellingPrice: number;

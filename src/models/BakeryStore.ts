@@ -1,17 +1,61 @@
 import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry } from '../../types';
 import { INITIAL_ITEMS, CREDENTIALS } from '../../constants';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // Simple event emitter for store updates
 type Listener = () => void;
+
+// Database row types
+interface DbItem {
+    id: string;
+    name: string;
+    category: string;
+    unit: string;
+    cost_price: number;
+    selling_price: number;
+}
+
+interface DbShift {
+    id: string;
+    status: string;
+    start_time: string | null;
+    end_time: string | null;
+    opening_cash: number;
+    closing_cash: number | null;
+}
+
+interface DbProduction {
+    id: string;
+    shift_id: string;
+    item_id: string;
+    quantity: number;
+    timestamp: string;
+}
+
+interface DbSale {
+    id: string;
+    shift_id: string;
+    item_id: string;
+    quantity: number;
+    timestamp: string;
+}
+
+interface DbInventory {
+    shift_id: string;
+    item_id: string;
+    beginning: number;
+    ending: number | null;
+}
 
 export class BakeryStore {
     items: BakeryItem[];
     shift: Shift;
     isAuthenticated: boolean;
+    isLoading: boolean = true;
     private listeners: Set<Listener> = new Set();
 
     constructor() {
-        // Load from localStorage or defaults
+        // Load from localStorage first (fast startup)
         const savedItems = localStorage.getItem('bakery_items');
         this.items = savedItems ? JSON.parse(savedItems) : INITIAL_ITEMS;
 
@@ -36,9 +80,155 @@ export class BakeryStore {
         };
 
         this.isAuthenticated = localStorage.getItem('is_authenticated') === 'true';
+
+        // Then sync with Supabase in background
+        if (isSupabaseConfigured) {
+            this.loadFromSupabase();
+        } else {
+            this.isLoading = false;
+        }
     }
 
-    // Subscriptions
+    // ==================== SUPABASE SYNC ====================
+
+    async loadFromSupabase() {
+        if (!supabase) return;
+
+        try {
+            // Load items from database
+            const { data: dbItems, error: itemsError } = await supabase
+                .from('items')
+                .select('*')
+                .order('name');
+
+            if (itemsError) {
+                console.error('Error loading items:', itemsError);
+                this.isLoading = false;
+                return;
+            }
+
+            // If no items in database, seed with initial items from constants
+            if (!dbItems || dbItems.length === 0) {
+                console.log('No items in database. Seeding with initial items...');
+                await this.seedDatabase();
+                return; // seedDatabase will call loadFromSupabase again
+            }
+
+            // Use items from database
+            this.items = dbItems.map((item: DbItem) => ({
+                id: item.id,
+                name: item.name,
+                category: item.category as BakeryItem['category'],
+                unit: item.unit,
+                costPrice: Number(item.cost_price),
+                sellingPrice: Number(item.selling_price)
+            }));
+
+            // Load active shift (most recent OPEN or last CLOSED)
+            const { data: dbShifts } = await supabase
+                .from('shifts')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            if (dbShifts && dbShifts.length > 0) {
+                const dbShift = dbShifts[0] as DbShift;
+
+                // Load production for this shift
+                const { data: dbProduction } = await supabase
+                    .from('production')
+                    .select('*')
+                    .eq('shift_id', dbShift.id);
+
+                // Load sales for this shift
+                const { data: dbSales } = await supabase
+                    .from('sales')
+                    .select('*')
+                    .eq('shift_id', dbShift.id);
+
+                // Load inventory for this shift
+                const { data: dbInventory } = await supabase
+                    .from('inventory')
+                    .select('*')
+                    .eq('shift_id', dbShift.id);
+
+                const inventoryStart: Record<string, number> = {};
+                const inventoryEnd: Record<string, number> = {};
+
+                (dbInventory || []).forEach((inv: DbInventory) => {
+                    inventoryStart[inv.item_id] = inv.beginning;
+                    if (inv.ending !== null) {
+                        inventoryEnd[inv.item_id] = inv.ending;
+                    }
+                });
+
+                this.shift = {
+                    id: dbShift.id,
+                    status: dbShift.status as ShiftStatus,
+                    startTime: dbShift.start_time ? new Date(dbShift.start_time).getTime() : null,
+                    endTime: dbShift.end_time ? new Date(dbShift.end_time).getTime() : null,
+                    openingCash: Number(dbShift.opening_cash),
+                    closingCash: dbShift.closing_cash ? Number(dbShift.closing_cash) : null,
+                    production: (dbProduction || []).map((p: DbProduction) => ({
+                        id: p.id,
+                        itemId: p.item_id,
+                        quantity: p.quantity,
+                        timestamp: new Date(p.timestamp).getTime()
+                    })),
+                    sales: (dbSales || []).map((s: DbSale) => ({
+                        id: s.id,
+                        itemId: s.item_id,
+                        quantity: s.quantity,
+                        timestamp: new Date(s.timestamp).getTime()
+                    })),
+                    inventoryStart,
+                    inventoryEnd
+                };
+            }
+
+            this.isLoading = false;
+            this.persist();
+            this.notify();
+        } catch (error) {
+            console.error('Failed to load from Supabase:', error);
+            this.isLoading = false;
+        }
+    }
+
+    // Seed database with initial items from constants
+    async seedDatabase() {
+        if (!supabase) return;
+
+        try {
+            console.log('Seeding database with', INITIAL_ITEMS.length, 'items...');
+
+            const itemsToInsert = INITIAL_ITEMS.map(item => ({
+                id: crypto.randomUUID(),
+                name: item.name,
+                category: item.category,
+                unit: item.unit,
+                cost_price: item.costPrice,
+                selling_price: item.sellingPrice
+            }));
+
+            const { error } = await supabase.from('items').insert(itemsToInsert);
+
+            if (error) {
+                console.error('Failed to seed database:', error);
+                return;
+            }
+
+            console.log('Database seeded successfully!');
+
+            // Reload from database to get the seeded items
+            await this.loadFromSupabase();
+        } catch (error) {
+            console.error('Seeding error:', error);
+        }
+    }
+
+    // ==================== SUBSCRIPTIONS ====================
+
     subscribe(listener: Listener) {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
@@ -55,7 +245,8 @@ export class BakeryStore {
         localStorage.setItem('is_authenticated', this.isAuthenticated.toString());
     }
 
-    // Auth Actions
+    // ==================== AUTH ACTIONS ====================
+
     login(username: string, password: string): boolean {
         if (username === CREDENTIALS.username && password === CREDENTIALS.password) {
             this.isAuthenticated = true;
@@ -70,26 +261,26 @@ export class BakeryStore {
         this.notify();
     }
 
-    // Shift Actions
-    startShift() {
-        // Always load from previous shift's ending inventory, or initialize to 0 for all items
+    // ==================== SHIFT ACTIONS ====================
+
+    async startShift() {
         let finalInventoryStart: Record<string, number> = {};
 
         const savedShift = localStorage.getItem('current_shift');
         const prevShift: Shift | null = savedShift ? JSON.parse(savedShift) : null;
-        
+
         if (prevShift && prevShift.status === ShiftStatus.CLOSED && prevShift.inventoryEnd && Object.keys(prevShift.inventoryEnd).length > 0) {
-            // Use previous shift's ending inventory as this shift's beginning
             finalInventoryStart = { ...prevShift.inventoryEnd };
         } else {
-            // Initialize all items to 0 if no previous shift
             this.items.forEach(item => {
                 finalInventoryStart[item.id] = 0;
             });
         }
 
+        const newShiftId = crypto.randomUUID();
+
         this.shift = {
-            id: Date.now().toString(),
+            id: newShiftId,
             status: ShiftStatus.OPEN,
             startTime: Date.now(),
             endTime: null,
@@ -100,10 +291,35 @@ export class BakeryStore {
             inventoryStart: finalInventoryStart,
             inventoryEnd: {}
         };
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('shifts').insert({
+                    id: newShiftId,
+                    status: 'OPEN',
+                    start_time: new Date().toISOString(),
+                    opening_cash: 0
+                });
+
+                // Insert inventory start records
+                const inventoryRecords = Object.entries(finalInventoryStart).map(([itemId, beginning]) => ({
+                    shift_id: newShiftId,
+                    item_id: itemId,
+                    beginning
+                }));
+
+                if (inventoryRecords.length > 0) {
+                    await supabase.from('inventory').insert(inventoryRecords);
+                }
+            } catch (error) {
+                console.error('Failed to sync shift start to Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    // New method: Calculate expected inventory end based on sales
     prefillEndingInventory() {
         const newInventoryEnd: Record<string, number> = {};
 
@@ -113,13 +329,10 @@ export class BakeryStore {
                 .filter(p => p.itemId === item.id)
                 .reduce((acc, p) => acc + p.quantity, 0);
 
-            // Sales Qty from additive log
             const sold = this.shift.sales
                 .filter(s => s.itemId === item.id)
                 .reduce((acc, s) => acc + s.quantity, 0);
 
-            // Logic: End = (Beg + Prod) - Sold
-            // If Sold > Available, we assume End is 0 (or allow negative if logical, but usually 0 floor)
             const expectedEnd = Math.max(0, (beg + prod) - sold);
             newInventoryEnd[item.id] = expectedEnd;
         });
@@ -128,85 +341,243 @@ export class BakeryStore {
         this.notify();
     }
 
-    endShift(closingCash: number) {
+    async endShift(closingCash: number) {
         this.shift = {
             ...this.shift,
             status: ShiftStatus.CLOSED,
             endTime: Date.now(),
             closingCash
         };
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('shifts').update({
+                    status: 'CLOSED',
+                    end_time: new Date().toISOString(),
+                    closing_cash: closingCash
+                }).eq('id', this.shift.id);
+
+                // Update inventory ending values
+                for (const [itemId, ending] of Object.entries(this.shift.inventoryEnd)) {
+                    await supabase.from('inventory').upsert({
+                        shift_id: this.shift.id,
+                        item_id: itemId,
+                        beginning: this.shift.inventoryStart[itemId] || 0,
+                        ending
+                    }, { onConflict: 'shift_id,item_id' });
+                }
+            } catch (error) {
+                console.error('Failed to sync shift end to Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    // Production Actions
-    addProduction(itemId: string, quantity: number) {
+    // ==================== PRODUCTION ACTIONS ====================
+
+    async addProduction(itemId: string, quantity: number) {
+        const entryId = crypto.randomUUID();
         const entry: ProductionEntry = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: entryId,
             itemId,
             quantity,
             timestamp: Date.now()
         };
         this.shift.production = [...this.shift.production, entry];
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('production').insert({
+                    id: entryId,
+                    shift_id: this.shift.id,
+                    item_id: itemId,
+                    quantity,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Failed to sync production to Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    // Sales Actions
-    addSale(itemId: string, quantity: number) {
+    // ==================== SALES ACTIONS ====================
+
+    async addSale(itemId: string, quantity: number) {
+        const entryId = crypto.randomUUID();
         const entry: SaleEntry = {
-            id: Math.random().toString(36).substr(2, 9),
+            id: entryId,
             itemId,
             quantity,
             timestamp: Date.now()
         };
         this.shift.sales = [...this.shift.sales, entry];
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('sales').insert({
+                    id: entryId,
+                    shift_id: this.shift.id,
+                    item_id: itemId,
+                    quantity,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Failed to sync sale to Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    setSalesQuantity(itemId: string, quantity: number) {
-        // Remove existing sales for this item
+    async setSalesQuantity(itemId: string, quantity: number) {
         const otherSales = this.shift.sales.filter(s => s.itemId !== itemId);
 
+        // Delete existing sales for this item in Supabase
+        if (supabase) {
+            try {
+                await supabase.from('sales')
+                    .delete()
+                    .eq('shift_id', this.shift.id)
+                    .eq('item_id', itemId);
+            } catch (error) {
+                console.error('Failed to delete sales from Supabase:', error);
+            }
+        }
+
         if (quantity > 0) {
-            // Add single consolidated entry
+            const entryId = crypto.randomUUID();
             const entry: SaleEntry = {
-                id: Math.random().toString(36).substr(2, 9),
+                id: entryId,
                 itemId,
                 quantity,
                 timestamp: Date.now()
             };
             this.shift.sales = [...otherSales, entry];
+
+            // Add new consolidated entry
+            if (supabase) {
+                try {
+                    await supabase.from('sales').insert({
+                        id: entryId,
+                        shift_id: this.shift.id,
+                        item_id: itemId,
+                        quantity,
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Failed to sync sale to Supabase:', error);
+                }
+            }
         } else {
             this.shift.sales = otherSales;
         }
         this.notify();
     }
 
-    // Item Actions
-    addItem(item: BakeryItem) {
+    // ==================== ITEM ACTIONS ====================
+
+    async addItem(item: BakeryItem) {
         this.items = [...this.items, item];
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('items').insert({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category,
+                    unit: item.unit,
+                    cost_price: item.costPrice,
+                    selling_price: item.sellingPrice
+                });
+            } catch (error) {
+                console.error('Failed to sync item to Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    updateItem(updatedItem: BakeryItem) {
+    async updateItem(updatedItem: BakeryItem) {
         this.items = this.items.map(i => i.id === updatedItem.id ? updatedItem : i);
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('items').update({
+                    name: updatedItem.name,
+                    category: updatedItem.category,
+                    unit: updatedItem.unit,
+                    cost_price: updatedItem.costPrice,
+                    selling_price: updatedItem.sellingPrice
+                }).eq('id', updatedItem.id);
+            } catch (error) {
+                console.error('Failed to update item in Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    resetCatalog() {
+    async resetCatalog() {
         this.items = INITIAL_ITEMS;
+
+        // Sync to Supabase - delete all and re-insert
+        if (supabase) {
+            try {
+                await supabase.from('items').delete().neq('id', '');
+
+                const itemsToInsert = INITIAL_ITEMS.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category,
+                    unit: item.unit,
+                    cost_price: item.costPrice,
+                    selling_price: item.sellingPrice
+                }));
+
+                await supabase.from('items').insert(itemsToInsert);
+            } catch (error) {
+                console.error('Failed to reset catalog in Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    // Inventory Actions
-    setEndingInventory(itemId: string, count: number) {
+    // ==================== INVENTORY ACTIONS ====================
+
+    async setEndingInventory(itemId: string, count: number) {
         this.shift.inventoryEnd = {
             ...this.shift.inventoryEnd,
             [itemId]: count
         };
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('inventory').upsert({
+                    shift_id: this.shift.id,
+                    item_id: itemId,
+                    beginning: this.shift.inventoryStart[itemId] || 0,
+                    ending: count
+                }, { onConflict: 'shift_id,item_id' });
+            } catch (error) {
+                console.error('Failed to update inventory in Supabase:', error);
+            }
+        }
+
         this.notify();
     }
 
-    // Computed Values
+    // ==================== COMPUTED VALUES ====================
+
     get inventorySheetData() {
         return this.items.map(item => {
             const beg = this.shift.inventoryStart[item.id] || 0;
@@ -215,9 +586,6 @@ export class BakeryStore {
                 .reduce((sum, p) => sum + p.quantity, 0);
             const total = beg + prod;
             const end = this.shift.inventoryEnd[item.id] !== undefined ? this.shift.inventoryEnd[item.id] : 0;
-            // Sold = Total - Ending (if ending is entered, else 0 or assume full sale? Logic: usually Sold is derived)
-            // If ending is not set, we can't calculate sold accurately yet, or assume 0 sold? 
-            // In this specific flow: Sold = (Beg + Prod) - End
             const sold = this.shift.inventoryEnd[item.id] !== undefined ? Math.max(0, total - end) : 0;
 
             return {
@@ -225,7 +593,7 @@ export class BakeryStore {
                 beg,
                 prod,
                 total,
-                end: this.shift.inventoryEnd[item.id], // could be undefined
+                end: this.shift.inventoryEnd[item.id],
                 sold,
                 amount: sold * item.sellingPrice
             };
@@ -233,8 +601,6 @@ export class BakeryStore {
     }
 
     get totalRevenue() {
-        // Use inventory calculation if available, otherwise fall back to logged sales? 
-        // For mixed mode, we sum the "Amount" column of the sheet.
         return this.inventorySheetData.reduce((acc, row) => acc + row.amount, 0);
     }
 
@@ -250,7 +616,7 @@ export class BakeryStore {
             const produced = this.shift.production
                 .filter(p => p.itemId === item.id)
                 .reduce((sum, p) => sum + p.quantity, 0);
-            
+
             const sold = this.shift.sales
                 .filter(s => s.itemId === item.id)
                 .reduce((sum, s) => sum + s.quantity, 0);
@@ -260,7 +626,7 @@ export class BakeryStore {
                 produced,
                 sold
             };
-        }).filter(data => data.produced > 0 || data.sold > 0); // Only show items with activity
+        }).filter(data => data.produced > 0 || data.sold > 0);
     }
 }
 

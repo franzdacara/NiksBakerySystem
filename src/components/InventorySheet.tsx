@@ -36,7 +36,7 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
                                 <i className="fas fa-clipboard-list mr-3 text-amber-700"></i>
                                 Daily Inventory Sheet
                             </h3>
-                            <p className="text-xs text-stone-500 mt-1">Sold = (Beginning + Production) - Ending</p>
+                            <p className="text-xs text-stone-500 mt-1">Sold = (Beginning + Production) - Ending - BO</p>
                         </div>
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
                             <div className="flex flex-col sm:flex-row gap-3">
@@ -82,6 +82,7 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
                                 <th className="px-4 py-4 text-center bg-amber-50/50">Prod</th>
                                 <th className="px-4 py-4 text-center font-extrabold bg-stone-200/50">Total</th>
                                 <th className="px-4 py-4 text-center bg-red-50/50 w-32">Ending</th>
+                                <th className="px-4 py-4 text-center bg-orange-50/50">BO</th>
                                 <th className="px-4 py-4 text-center bg-green-50/50">Sold</th>
                                 <th className="px-4 py-4 text-right">Price</th>
                                 <th className="px-6 py-4 text-right">Amount</th>
@@ -133,6 +134,11 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
                                         />
                                     </td>
 
+                                    {/* BO (Discharge) */}
+                                    <td className="px-4 py-3 text-center text-orange-600 bg-orange-50/30 font-medium">
+                                        {row.bo > 0 ? row.bo : '-'}
+                                    </td>
+
                                     {/* Sold */}
                                     <td className="px-4 py-3 text-center font-bold text-green-700 bg-green-50/30">
                                         {row.sold}
@@ -151,7 +157,7 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
                             ))}
                             {filteredData.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="px-6 py-12 text-center text-stone-400">
+                                    <td colSpan={10} className="px-6 py-12 text-center text-stone-400">
                                         <i className="fas fa-search text-3xl mb-3 opacity-30"></i>
                                         <p>No items found matching your search.</p>
                                     </td>
@@ -160,7 +166,7 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
                         </tbody>
                         <tfoot className="bg-stone-50 font-bold border-t border-stone-200">
                             <tr>
-                                <td colSpan={6} className="px-6 py-4 text-right text-stone-500 uppercase text-xs tracking-widest">Grand Total</td>
+                                <td colSpan={7} className="px-6 py-4 text-right text-stone-500 uppercase text-xs tracking-widest">Grand Total</td>
                                 <td className="px-4 py-4 text-center text-green-700">
                                     {data.reduce((acc, r) => acc + r.sold, 0)}
                                 </td>

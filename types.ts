@@ -4,6 +4,13 @@ export enum ShiftStatus {
   OPEN = 'OPEN',
 }
 
+export enum DischargeReason {
+  EXPIRED = 'Expired',
+  DAMAGED = 'Damaged',
+  QUALITY_ISSUE = 'Quality Issue',
+  OTHER = 'Other',
+}
+
 export interface BakeryItem {
   id: string;
   name: string;
@@ -27,6 +34,15 @@ export interface SaleEntry {
   timestamp: number;
 }
 
+export interface DischargeEntry {
+  id: string;
+  itemId: string;
+  quantity: number;
+  reason: DischargeReason;
+  notes?: string;
+  timestamp: number;
+}
+
 export interface Shift {
   id: string;
   status: ShiftStatus;
@@ -36,6 +52,7 @@ export interface Shift {
   closingCash: number | null;
   production: ProductionEntry[];
   sales: SaleEntry[];
+  discharges: DischargeEntry[];
   inventoryStart: Record<string, number>;
   inventoryEnd: Record<string, number>;
 }

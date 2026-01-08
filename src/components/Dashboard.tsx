@@ -21,16 +21,17 @@ const StatCard: React.FC<{ icon: string; label: string; value: string; color: st
 );
 
 export const Dashboard: React.FC<DashboardProps> = ({ store }) => {
-    const { totalRevenue, totalCost, salesData, shift } = store;
+    const { totalRevenue, totalCost, salesData, shift, totalDischarges } = store;
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
             {/* Stats Overview */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
                 <StatCard icon="fa-dollar-sign" label="Revenue" value={`₱${totalRevenue.toFixed(2)}`} color="bg-green-100 text-green-700" />
                 <StatCard icon="fa-wheat-awn" label="Production Cost" value={`₱${totalCost.toFixed(2)}`} color="bg-orange-100 text-orange-700" />
                 <StatCard icon="fa-chart-pie" label="Profit (Est.)" value={`₱${(totalRevenue - totalCost).toFixed(2)}`} color="bg-blue-100 text-blue-700" />
                 <StatCard icon="fa-box" label="Total Sold" value={`${shift.sales.reduce((a, b) => a + b.quantity, 0)} units`} color="bg-purple-100 text-purple-700" />
+                <StatCard icon="fa-trash-alt" label="BO / Wastage" value={`${totalDischarges.count} units`} color="bg-red-100 text-red-700" />
             </div>
 
             <div className="grid grid-cols-1 gap-8">

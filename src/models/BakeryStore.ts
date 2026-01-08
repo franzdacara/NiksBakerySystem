@@ -1,4 +1,4 @@
-import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry } from '../../types';
+import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry, DischargeEntry, DischargeReason } from '../../types';
 import { INITIAL_ITEMS, CREDENTIALS } from '../../constants';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -47,6 +47,16 @@ interface DbInventory {
     ending: number | null;
 }
 
+interface DbDischarge {
+    id: string;
+    shift_id: string;
+    item_id: string;
+    quantity: number;
+    reason: string;
+    notes: string | null;
+    timestamp: string;
+}
+
 export class BakeryStore {
     items: BakeryItem[];
     shift: Shift;
@@ -75,6 +85,7 @@ export class BakeryStore {
             closingCash: null,
             production: [],
             sales: [],
+            discharges: [],
             inventoryStart: {},
             inventoryEnd: {}
         };
@@ -162,6 +173,12 @@ export class BakeryStore {
                     }
                 });
 
+                // Load discharges for this shift
+                const { data: dbDischarges } = await supabase
+                    .from('discharges')
+                    .select('*')
+                    .eq('shift_id', dbShift.id);
+
                 this.shift = {
                     id: dbShift.id,
                     status: dbShift.status as ShiftStatus,
@@ -180,6 +197,14 @@ export class BakeryStore {
                         itemId: s.item_id,
                         quantity: s.quantity,
                         timestamp: new Date(s.timestamp).getTime()
+                    })),
+                    discharges: (dbDischarges || []).map((d: DbDischarge) => ({
+                        id: d.id,
+                        itemId: d.item_id,
+                        quantity: d.quantity,
+                        reason: d.reason as DischargeReason,
+                        notes: d.notes || undefined,
+                        timestamp: new Date(d.timestamp).getTime()
                     })),
                     inventoryStart,
                     inventoryEnd
@@ -288,6 +313,7 @@ export class BakeryStore {
             closingCash: null,
             production: [],
             sales: [],
+            discharges: [],
             inventoryStart: finalInventoryStart,
             inventoryEnd: {}
         };
@@ -480,6 +506,55 @@ export class BakeryStore {
         this.notify();
     }
 
+    // ==================== DISCHARGE/BO ACTIONS ====================
+
+    async addDischarge(itemId: string, quantity: number, reason: DischargeReason, notes?: string) {
+        const entryId = crypto.randomUUID();
+        const entry: DischargeEntry = {
+            id: entryId,
+            itemId,
+            quantity,
+            reason,
+            notes,
+            timestamp: Date.now()
+        };
+        this.shift.discharges = [...this.shift.discharges, entry];
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('discharges').insert({
+                    id: entryId,
+                    shift_id: this.shift.id,
+                    item_id: itemId,
+                    quantity,
+                    reason,
+                    notes: notes || null,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('Failed to sync discharge to Supabase:', error);
+            }
+        }
+
+        this.notify();
+    }
+
+    async removeDischarge(id: string) {
+        this.shift.discharges = this.shift.discharges.filter(d => d.id !== id);
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('discharges').delete().eq('id', id);
+            } catch (error) {
+                console.error('Failed to delete discharge from Supabase:', error);
+            }
+        }
+
+        this.notify();
+    }
+
     // ==================== ITEM ACTIONS ====================
 
     async addItem(item: BakeryItem) {
@@ -584,20 +659,35 @@ export class BakeryStore {
             const prod = this.shift.production
                 .filter(p => p.itemId === item.id)
                 .reduce((sum, p) => sum + p.quantity, 0);
+            const bo = this.shift.discharges
+                .filter(d => d.itemId === item.id)
+                .reduce((sum, d) => sum + d.quantity, 0);
             const total = beg + prod;
             const end = this.shift.inventoryEnd[item.id] !== undefined ? this.shift.inventoryEnd[item.id] : 0;
-            const sold = this.shift.inventoryEnd[item.id] !== undefined ? Math.max(0, total - end) : 0;
+            // Sold = Total - Ending - BO
+            const sold = this.shift.inventoryEnd[item.id] !== undefined ? Math.max(0, total - end - bo) : 0;
 
             return {
                 item,
                 beg,
                 prod,
+                bo,
                 total,
                 end: this.shift.inventoryEnd[item.id],
                 sold,
                 amount: sold * item.sellingPrice
             };
         });
+    }
+
+    get totalDischarges() {
+        return this.shift.discharges.reduce((acc, d) => {
+            const item = this.items.find(i => i.id === d.itemId);
+            return {
+                count: acc.count + d.quantity,
+                cost: acc.cost + (item ? item.costPrice * d.quantity : 0)
+            };
+        }, { count: 0, cost: 0 });
     }
 
     get totalRevenue() {

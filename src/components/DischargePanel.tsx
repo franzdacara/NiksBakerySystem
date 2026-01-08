@@ -213,9 +213,9 @@ export const DischargePanel: React.FC<DischargePanelProps> = ({ store }) => {
                                         </td>
                                         <td className="px-4 py-3">
                                             <span className={`px-2 py-1 text-[10px] font-bold rounded-full uppercase ${discharge.reason === DischargeReason.EXPIRED ? 'bg-yellow-100 text-yellow-800' :
-                                                    discharge.reason === DischargeReason.DAMAGED ? 'bg-red-100 text-red-800' :
-                                                        discharge.reason === DischargeReason.QUALITY_ISSUE ? 'bg-orange-100 text-orange-800' :
-                                                            'bg-stone-100 text-stone-800'
+                                                discharge.reason === DischargeReason.DAMAGED ? 'bg-red-100 text-red-800' :
+                                                    discharge.reason === DischargeReason.QUALITY_ISSUE ? 'bg-orange-100 text-orange-800' :
+                                                        'bg-stone-100 text-stone-800'
                                                 }`}>
                                                 {discharge.reason}
                                             </span>
@@ -224,7 +224,7 @@ export const DischargePanel: React.FC<DischargePanelProps> = ({ store }) => {
                                             {discharge.notes || '-'}
                                         </td>
                                         <td className="px-4 py-3 text-stone-500 text-xs">
-                                            {new Date(discharge.timestamp).toLocaleTimeString()}
+                                            {new Date(discharge.timestamp).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true })}
                                         </td>
                                         <td className="px-6 py-3 text-center">
                                             <button

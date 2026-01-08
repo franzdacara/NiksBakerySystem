@@ -161,7 +161,7 @@ export const ProductionPanel: React.FC<ProductionPanelProps> = ({ store }) => {
                                         <span className="font-medium text-stone-700">{item?.name}</span>
                                         <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold">+{p.quantity}</span>
                                         <span className="text-[10px] text-stone-400">
-                                            {new Date(p.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            {new Date(p.timestamp).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true })}
                                         </span>
                                     </div>
                                 );

@@ -110,7 +110,7 @@ const App: React.FC = () => {
             <h2 className="text-3xl font-bold text-stone-800">
               {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
             </h2>
-            <p className="text-stone-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <p className="text-stone-500">{new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
           </div>
 
           <div className="flex items-center space-x-3">

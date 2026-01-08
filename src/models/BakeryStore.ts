@@ -359,7 +359,12 @@ export class BakeryStore {
                 .filter(s => s.itemId === item.id)
                 .reduce((acc, s) => acc + s.quantity, 0);
 
-            const expectedEnd = Math.max(0, (beg + prod) - sold);
+            // BO (discharges) should also reduce the inventory
+            const bo = this.shift.discharges
+                .filter(d => d.itemId === item.id)
+                .reduce((acc, d) => acc + d.quantity, 0);
+
+            const expectedEnd = Math.max(0, (beg + prod) - sold - bo);
             newInventoryEnd[item.id] = expectedEnd;
         });
 

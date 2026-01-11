@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BakeryStore } from '../models/BakeryStore';
 import { ShiftStatus } from '../../types';
+import { supabase } from '../lib/supabase';
 
 interface SalesPosProps {
     store: BakeryStore;
@@ -8,13 +9,31 @@ interface SalesPosProps {
 
 export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
     const [, forceUpdate] = useState(0);
+    const [globalStock, setGlobalStock] = useState<Record<string, number>>({});
 
-    // Subscribe to store updates
+    // Fetch global inventory from Supabase
+    const fetchGlobalInventory = useCallback(async () => {
+        if (!supabase) return;
+        const { data } = await supabase
+            .from('global_inventory')
+            .select('item_id, quantity');
+        if (data) {
+            const stock: Record<string, number> = {};
+            data.forEach((row: { item_id: string; quantity: number }) => {
+                stock[row.item_id] = row.quantity;
+            });
+            setGlobalStock(stock);
+        }
+    }, []);
+
+    // Subscribe to store updates and refresh stock
     useEffect(() => {
+        fetchGlobalInventory();
         return store.subscribe(() => {
             forceUpdate(n => n + 1);
+            fetchGlobalInventory(); // Refresh stock when store updates
         });
-    }, [store]);
+    }, [store, fetchGlobalInventory]);
 
     const { shift, items, items: allItems, totalRevenue } = store;
 
@@ -96,16 +115,9 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
         };
     }).filter(i => i.qty > 0);
 
-    // Calculate available quantity for each item (beginning + production - sold)
+    // Calculate available quantity from global_inventory (includes BO/discharges)
     const getAvailableQty = (itemId: string) => {
-        const beg = shift.inventoryStart[itemId] || 0;
-        const prod = shift.production
-            .filter(p => p.itemId === itemId)
-            .reduce((sum, p) => sum + p.quantity, 0);
-        const sold = shift.sales
-            .filter(s => s.itemId === itemId)
-            .reduce((sum, s) => sum + s.quantity, 0);
-        return beg + prod - sold;
+        return globalStock[itemId] || 0;
     };
 
     return (

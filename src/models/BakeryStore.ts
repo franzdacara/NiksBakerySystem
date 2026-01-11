@@ -1,5 +1,5 @@
 import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry, DischargeEntry, DischargeReason } from '../../types';
-import { INITIAL_ITEMS, CREDENTIALS } from '../../constants';
+import { INITIAL_ITEMS } from '../../constants';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 // Simple event emitter for store updates
@@ -57,10 +57,60 @@ interface DbDischarge {
     timestamp: string;
 }
 
+interface DbUser {
+    id: string;
+    username: string;
+    password: string;
+    display_name: string;
+    is_active: boolean;
+}
+
+interface DbGlobalInventory {
+    item_id: string;
+    quantity: number;
+}
+
+interface DbShiftReport {
+    id: string;
+    shift_id: string;
+    user_id: string | null;
+    user_display_name: string | null;
+    start_time: string;
+    end_time: string;
+    opening_cash: number;
+    closing_cash: number;
+    total_sales: number;
+    total_production: number;
+    total_sold_qty: number;
+    total_discharges: number;
+    inventory_start: Record<string, number>;
+    inventory_end: Record<string, number>;
+    created_at: string;
+}
+
+export interface ShiftReport {
+    id: string;
+    shiftId: string;
+    userId: string | null;
+    userDisplayName: string | null;
+    startTime: number;
+    endTime: number;
+    openingCash: number;
+    closingCash: number;
+    totalSales: number;
+    totalProduction: number;
+    totalSoldQty: number;
+    totalDischarges: number;
+    inventoryStart: Record<string, number>;
+    inventoryEnd: Record<string, number>;
+    createdAt: number;
+}
+
 export class BakeryStore {
     items: BakeryItem[];
     shift: Shift;
     isAuthenticated: boolean;
+    currentUser: { id: string; username: string; displayName: string } | null = null;
     isLoading: boolean = true;
     private listeners: Set<Listener> = new Set();
 
@@ -91,6 +141,8 @@ export class BakeryStore {
         };
 
         this.isAuthenticated = localStorage.getItem('is_authenticated') === 'true';
+        const savedUser = localStorage.getItem('current_user');
+        this.currentUser = savedUser ? JSON.parse(savedUser) : null;
 
         // Then sync with Supabase in background
         if (isSupabaseConfigured) {
@@ -147,7 +199,7 @@ export class BakeryStore {
 
                 // Load production for this shift
                 const { data: dbProduction } = await supabase
-                    .from('production')
+                    .from('productions')
                     .select('*')
                     .eq('shift_id', dbShift.id);
 
@@ -157,20 +209,17 @@ export class BakeryStore {
                     .select('*')
                     .eq('shift_id', dbShift.id);
 
-                // Load inventory for this shift
-                const { data: dbInventory } = await supabase
-                    .from('inventory')
-                    .select('*')
-                    .eq('shift_id', dbShift.id);
+                // Load inventory from global_inventory (current state)
+                const { data: globalInv } = await supabase
+                    .from('global_inventory')
+                    .select('*');
 
                 const inventoryStart: Record<string, number> = {};
                 const inventoryEnd: Record<string, number> = {};
 
-                (dbInventory || []).forEach((inv: DbInventory) => {
-                    inventoryStart[inv.item_id] = inv.beginning;
-                    if (inv.ending !== null) {
-                        inventoryEnd[inv.item_id] = inv.ending;
-                    }
+                (globalInv || []).forEach((inv: { item_id: string; quantity: number }) => {
+                    inventoryStart[inv.item_id] = inv.quantity;
+                    inventoryEnd[inv.item_id] = inv.quantity;
                 });
 
                 // Load discharges for this shift
@@ -272,17 +321,50 @@ export class BakeryStore {
 
     // ==================== AUTH ACTIONS ====================
 
-    login(username: string, password: string): boolean {
-        if (username === CREDENTIALS.username && password === CREDENTIALS.password) {
-            this.isAuthenticated = true;
-            this.notify();
-            return true;
+    async login(username: string, password: string): Promise<boolean> {
+        if (!supabase) {
+            console.error('Supabase not configured');
+            return false;
         }
-        return false;
+
+        try {
+            const { data: users, error } = await supabase
+                .from('users')
+                .select('id, username, password, display_name, is_active')
+                .eq('username', username.toLowerCase())
+                .eq('is_active', true)
+                .limit(1);
+
+            if (error) {
+                console.error('Login error:', error);
+                return false;
+            }
+
+            if (users && users.length > 0) {
+                const user = users[0] as DbUser;
+                if (user.password === password) {
+                    this.isAuthenticated = true;
+                    this.currentUser = {
+                        id: user.id,
+                        username: user.username,
+                        displayName: user.display_name
+                    };
+                    localStorage.setItem('current_user', JSON.stringify(this.currentUser));
+                    this.notify();
+                    return true;
+                }
+            }
+            return false;
+        } catch (error) {
+            console.error('Login failed:', error);
+            return false;
+        }
     }
 
     logout() {
         this.isAuthenticated = false;
+        this.currentUser = null;
+        localStorage.removeItem('current_user');
         this.notify();
     }
 
@@ -291,16 +373,29 @@ export class BakeryStore {
     async startShift() {
         let finalInventoryStart: Record<string, number> = {};
 
-        const savedShift = localStorage.getItem('current_shift');
-        const prevShift: Shift | null = savedShift ? JSON.parse(savedShift) : null;
+        // Fetch current inventory from global_inventory table
+        if (supabase) {
+            try {
+                const { data: globalInv } = await supabase
+                    .from('global_inventory')
+                    .select('item_id, quantity');
 
-        if (prevShift && prevShift.status === ShiftStatus.CLOSED && prevShift.inventoryEnd && Object.keys(prevShift.inventoryEnd).length > 0) {
-            finalInventoryStart = { ...prevShift.inventoryEnd };
-        } else {
-            this.items.forEach(item => {
-                finalInventoryStart[item.id] = 0;
-            });
+                if (globalInv && globalInv.length > 0) {
+                    globalInv.forEach((inv: DbGlobalInventory) => {
+                        finalInventoryStart[inv.item_id] = inv.quantity;
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to fetch global inventory:', error);
+            }
         }
+
+        // Ensure all items have an entry (default to 0 for new items)
+        this.items.forEach(item => {
+            if (finalInventoryStart[item.id] === undefined) {
+                finalInventoryStart[item.id] = 0;
+            }
+        });
 
         const newShiftId = crypto.randomUUID();
 
@@ -325,18 +420,16 @@ export class BakeryStore {
                     id: newShiftId,
                     status: 'OPEN',
                     start_time: new Date().toISOString(),
-                    opening_cash: 0
+                    opening_cash: 0,
+                    user_id: this.currentUser?.username || null
                 });
 
-                // Insert inventory start records
-                const inventoryRecords = Object.entries(finalInventoryStart).map(([itemId, beginning]) => ({
-                    shift_id: newShiftId,
-                    item_id: itemId,
-                    beginning
-                }));
-
-                if (inventoryRecords.length > 0) {
-                    await supabase.from('inventory').insert(inventoryRecords);
+                // Ensure global_inventory has entries for all items
+                for (const item of this.items) {
+                    await supabase.from('global_inventory').upsert({
+                        item_id: item.id,
+                        quantity: finalInventoryStart[item.id] || 0
+                    }, { onConflict: 'item_id' });
                 }
             } catch (error) {
                 console.error('Failed to sync shift start to Supabase:', error);
@@ -380,30 +473,83 @@ export class BakeryStore {
             closingCash
         };
 
+        // Calculate totals for the shift report
+        const totalProduction = this.shift.production.reduce((acc, p) => acc + p.quantity, 0);
+        const totalSoldQty = this.shift.sales.reduce((acc, s) => acc + s.quantity, 0);
+        const totalDischarges = this.shift.discharges.reduce((acc, d) => acc + d.quantity, 0);
+
         // Sync to Supabase
         if (supabase) {
             try {
+                // Update shift status
                 await supabase.from('shifts').update({
                     status: 'CLOSED',
                     end_time: new Date().toISOString(),
                     closing_cash: closingCash
                 }).eq('id', this.shift.id);
 
-                // Update inventory ending values
-                for (const [itemId, ending] of Object.entries(this.shift.inventoryEnd)) {
-                    await supabase.from('inventory').upsert({
-                        shift_id: this.shift.id,
-                        item_id: itemId,
-                        beginning: this.shift.inventoryStart[itemId] || 0,
-                        ending
-                    }, { onConflict: 'shift_id,item_id' });
-                }
+                // Create shift report for historical tracking
+                await supabase.from('shift_reports').insert({
+                    shift_id: this.shift.id,
+                    user_id: this.currentUser?.username || null,
+                    user_display_name: this.currentUser?.displayName || null,
+                    start_time: this.shift.startTime ? new Date(this.shift.startTime).toISOString() : null,
+                    end_time: new Date().toISOString(),
+                    opening_cash: this.shift.openingCash,
+                    closing_cash: closingCash,
+                    inventory_start: this.shift.inventoryStart,
+                    inventory_end: this.shift.inventoryEnd,
+                    total_production: totalProduction,
+                    total_sales: this.totalRevenue,
+                    total_sold_qty: totalSoldQty,
+                    total_discharges: totalDischarges
+                });
             } catch (error) {
                 console.error('Failed to sync shift end to Supabase:', error);
             }
         }
 
         this.notify();
+    }
+
+    // ==================== SHIFT REPORTS ====================
+
+    async getShiftReports(limit: number = 20): Promise<ShiftReport[]> {
+        if (!supabase) return [];
+
+        try {
+            const { data, error } = await supabase
+                .from('shift_reports')
+                .select('*')
+                .order('end_time', { ascending: false })
+                .limit(limit);
+
+            if (error) {
+                console.error('Failed to fetch shift reports:', error);
+                return [];
+            }
+
+            return (data || []).map((r: DbShiftReport) => ({
+                id: r.id,
+                shiftId: r.shift_id,
+                userId: r.user_id,
+                userDisplayName: r.user_display_name,
+                startTime: new Date(r.start_time).getTime(),
+                endTime: new Date(r.end_time).getTime(),
+                openingCash: Number(r.opening_cash),
+                closingCash: Number(r.closing_cash),
+                totalSales: Number(r.total_sales),
+                totalProduction: r.total_production,
+                totalSoldQty: r.total_sold_qty,
+                totalDischarges: r.total_discharges,
+                inventoryStart: r.inventory_start || {},
+                inventoryEnd: r.inventory_end || {},
+                createdAt: new Date(r.created_at).getTime()
+            }));
+        } catch (error) {
+            console.error('Failed to fetch shift reports:', error);
+            return [];
+        }
     }
 
     // ==================== PRODUCTION ACTIONS ====================
@@ -418,14 +564,16 @@ export class BakeryStore {
         };
         this.shift.production = [...this.shift.production, entry];
 
-        // Sync to Supabase
+        // Sync to Supabase - trigger will auto-update global_inventory
         if (supabase) {
             try {
-                await supabase.from('production').insert({
+                await supabase.from('productions').insert({
                     id: entryId,
                     shift_id: this.shift.id,
                     item_id: itemId,
                     quantity,
+                    user_id: this.currentUser?.username || null,
+                    user_display_name: this.currentUser?.displayName || null,
                     timestamp: new Date().toISOString()
                 });
             } catch (error) {
@@ -639,19 +787,8 @@ export class BakeryStore {
             [itemId]: count
         };
 
-        // Sync to Supabase
-        if (supabase) {
-            try {
-                await supabase.from('inventory').upsert({
-                    shift_id: this.shift.id,
-                    item_id: itemId,
-                    beginning: this.shift.inventoryStart[itemId] || 0,
-                    ending: count
-                }, { onConflict: 'shift_id,item_id' });
-            } catch (error) {
-                console.error('Failed to update inventory in Supabase:', error);
-            }
-        }
+        // Note: global_inventory is updated via triggers when sales/production/discharge happen
+        // No need to manually sync here
 
         this.notify();
     }

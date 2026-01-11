@@ -55,8 +55,8 @@ export const generateShiftReport = (store: BakeryStore) => {
         row.total.toString(),
         (row.end !== undefined ? row.end : 0).toString(),
         row.sold.toString(),
-        `₱${row.item.sellingPrice.toFixed(2)}`,
-        `₱${row.amount.toFixed(2)}`
+        `P${row.item.sellingPrice.toFixed(2)}`,
+        `P${row.amount.toFixed(2)}`
     ]);
 
     autoTable(doc, {
@@ -113,7 +113,7 @@ export const generateShiftReport = (store: BakeryStore) => {
 
     doc.setFont('helvetica', 'bold');
     doc.text(`${totalSold} units`, 60, finalY + 22);
-    doc.text(`₱${totalCost.toFixed(2)}`, 60, finalY + 30);
+    doc.text(`P${totalCost.toFixed(2)}`, 60, finalY + 30);
 
     // Right column
     doc.setFont('helvetica', 'normal');
@@ -122,9 +122,9 @@ export const generateShiftReport = (store: BakeryStore) => {
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 128, 0);
-    doc.text(`₱${totalRevenue.toFixed(2)}`, 160, finalY + 22);
+    doc.text(`P${totalRevenue.toFixed(2)}`, 160, finalY + 22);
     doc.setTextColor(0, 100, 0);
-    doc.text(`₱${(totalRevenue - totalCost).toFixed(2)}`, 160, finalY + 30);
+    doc.text(`P${(totalRevenue - totalCost).toFixed(2)}`, 160, finalY + 30);
 
     // Reset text color
     doc.setTextColor(0, 0, 0);

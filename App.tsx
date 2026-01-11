@@ -9,6 +9,7 @@ import { SalesPos } from './src/components/SalesPos';
 import { InventoryManager } from './src/components/InventoryManager';
 import { InventorySheet } from './src/components/InventorySheet';
 import { DischargePanel } from './src/components/DischargePanel';
+import { ShiftReportsPanel } from './src/components/ShiftReportsPanel';
 import { generateShiftReport } from './services/pdfReport';
 
 // Hook to subscribe to store updates
@@ -23,7 +24,7 @@ const useBakeryStore = () => {
 const App: React.FC = () => {
   const store = useBakeryStore();
   const { isAuthenticated, shift } = store;
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'production' | 'sales' | 'inventory' | 'discharge' | 'sheet'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'production' | 'sales' | 'inventory' | 'discharge' | 'sheet' | 'reports'>('dashboard');
 
   if (!isAuthenticated) {
     return <Login store={store} />;
@@ -80,6 +81,13 @@ const App: React.FC = () => {
           >
             <i className="fas fa-trash-alt w-5"></i>
             <span>BO / Discharge</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('reports')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'reports' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
+          >
+            <i className="fas fa-file-alt w-5"></i>
+            <span>Shift Reports</span>
           </button>
         </div>
 
@@ -190,6 +198,7 @@ const App: React.FC = () => {
         {activeTab === 'inventory' && <InventoryManager store={store} />}
         {activeTab === 'sheet' && <InventorySheet store={store} />}
         {activeTab === 'discharge' && <DischargePanel store={store} />}
+        {activeTab === 'reports' && <ShiftReportsPanel store={store} />}
 
       </main>
     </div>

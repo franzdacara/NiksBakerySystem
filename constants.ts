@@ -1,11 +1,9 @@
 
 import { BakeryItem } from './types';
 
-// Static credentials
-export const CREDENTIALS = {
-  username: 'nikko',
-  password: 'S2e3r3!@'
-};
+// Note: User authentication is now handled via Supabase 'users' table
+// See supabase_users_table.sql for the table schema and initial user data
+
 
 export const INITIAL_ITEMS: BakeryItem[] = [
   // ============ BEVERAGES ============

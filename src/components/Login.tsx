@@ -9,10 +9,17 @@ interface LoginProps {
 export const Login: React.FC<LoginProps> = ({ store }) => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!store.login(username, password)) {
+        setIsLoading(true);
+
+        const success = await store.login(username, password);
+
+        setIsLoading(false);
+
+        if (!success) {
             Swal.fire({
                 icon: 'error',
                 title: 'Login Failed',
@@ -61,9 +68,17 @@ export const Login: React.FC<LoginProps> = ({ store }) => {
                     </div>
                     <button
                         type="submit"
-                        className="w-full bg-stone-900 hover:bg-stone-800 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98]"
+                        disabled={isLoading}
+                        className="w-full bg-stone-900 hover:bg-stone-800 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        Sign In
+                        {isLoading ? (
+                            <span className="flex items-center justify-center">
+                                <i className="fas fa-spinner fa-spin mr-2"></i>
+                                Signing In...
+                            </span>
+                        ) : (
+                            'Sign In'
+                        )}
                     </button>
                 </form>
 

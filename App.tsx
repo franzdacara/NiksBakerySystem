@@ -128,9 +128,13 @@ const App: React.FC = () => {
                   // Automatically start shift using previous ending inventory (or 0 for all items)
                   store.startShift();
                 }}
-                className="bg-green-700 hover:bg-green-600 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-md active:scale-95"
+                disabled={store.isStartingShift}
+                className="bg-green-700 hover:bg-green-600 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
               >
-                Start New Shift
+                {store.isStartingShift && (
+                  <i className="fas fa-spinner fa-spin"></i>
+                )}
+                <span>{store.isStartingShift ? 'Starting Shift...' : 'Start New Shift'}</span>
               </button>
             ) : (
               <button

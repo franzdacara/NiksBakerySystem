@@ -112,6 +112,7 @@ export class BakeryStore {
     isAuthenticated: boolean;
     currentUser: { id: string; username: string; displayName: string } | null = null;
     isLoading: boolean = true;
+    isStartingShift: boolean = false;
     private listeners: Set<Listener> = new Set();
 
     constructor() {
@@ -371,6 +372,9 @@ export class BakeryStore {
     // ==================== SHIFT ACTIONS ====================
 
     async startShift() {
+        this.isStartingShift = true;
+        this.notify();
+
         let finalInventoryStart: Record<string, number> = {};
 
         // Fetch current inventory from global_inventory table
@@ -413,7 +417,7 @@ export class BakeryStore {
             inventoryEnd: {}
         };
 
-        // Sync to Supabase
+        // Sync to Supabase in background
         if (supabase) {
             try {
                 await supabase.from('shifts').insert({
@@ -436,6 +440,7 @@ export class BakeryStore {
             }
         }
 
+        this.isStartingShift = false;
         this.notify();
     }
 

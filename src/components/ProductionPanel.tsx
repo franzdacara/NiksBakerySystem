@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BakeryStore } from '../models/BakeryStore';
-import { ShiftStatus } from '../../types';
+import { ShiftStatus, ProductionEntry } from '../../types';
 
 interface ProductionPanelProps {
     store: BakeryStore;
@@ -12,6 +12,13 @@ export const ProductionPanel: React.FC<ProductionPanelProps> = ({ store }) => {
     const [categoryFilter, setCategoryFilter] = useState<string>('all');
     const [editingItem, setEditingItem] = useState<{ id: string; name: string } | null>(null);
     const [qtyInput, setQtyInput] = useState('');
+
+    // State for editing existing production entries
+    const [editingProduction, setEditingProduction] = useState<ProductionEntry | null>(null);
+    const [editQtyInput, setEditQtyInput] = useState('');
+
+    // State for delete confirmation
+    const [deletingProduction, setDeletingProduction] = useState<ProductionEntry | null>(null);
 
     const categories = ['all', ...Array.from(new Set(items.map(i => i.category)))];
 
@@ -43,6 +50,30 @@ export const ProductionPanel: React.FC<ProductionPanelProps> = ({ store }) => {
         } else if (e.key === 'Escape') {
             setEditingItem(null);
         }
+    };
+
+    const handleEditProduction = () => {
+        if (!editingProduction) return;
+        const qty = parseInt(editQtyInput);
+        if (!isNaN(qty) && qty > 0) {
+            store.updateProduction(editingProduction.id, qty);
+        }
+        setEditingProduction(null);
+        setEditQtyInput('');
+    };
+
+    const handleEditKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            handleEditProduction();
+        } else if (e.key === 'Escape') {
+            setEditingProduction(null);
+        }
+    };
+
+    const handleDeleteProduction = () => {
+        if (!deletingProduction) return;
+        store.removeProduction(deletingProduction.id);
+        setDeletingProduction(null);
     };
 
     return (
@@ -163,6 +194,25 @@ export const ProductionPanel: React.FC<ProductionPanelProps> = ({ store }) => {
                                         <span className="text-[10px] text-stone-400">
                                             {new Date(p.timestamp).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: '2-digit', minute: '2-digit', hour12: true })}
                                         </span>
+                                        <div className="flex gap-1 ml-2 border-l border-stone-200 pl-2">
+                                            <button
+                                                onClick={() => {
+                                                    setEditingProduction(p);
+                                                    setEditQtyInput(p.quantity.toString());
+                                                }}
+                                                className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 p-1 rounded transition"
+                                                title="Edit quantity"
+                                            >
+                                                <i className="fas fa-edit text-xs"></i>
+                                            </button>
+                                            <button
+                                                onClick={() => setDeletingProduction(p)}
+                                                className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1 rounded transition"
+                                                title="Delete entry"
+                                            >
+                                                <i className="fas fa-trash text-xs"></i>
+                                            </button>
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -204,6 +254,83 @@ export const ProductionPanel: React.FC<ProductionPanelProps> = ({ store }) => {
                                     className="px-4 py-2 rounded-xl font-bold bg-amber-600 text-white hover:bg-amber-700 shadow-lg hover:shadow-xl transition active:scale-95"
                                 >
                                     Add Production
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Edit Production Modal */}
+            {editingProduction && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+                        <div className="p-6">
+                            <h3 className="text-lg font-bold text-stone-800 mb-1">Edit Production</h3>
+                            <p className="text-stone-500 text-sm mb-6">
+                                Update quantity for <span className="font-bold text-amber-700">{items.find(i => i.id === editingProduction.itemId)?.name}</span>
+                            </p>
+
+                            <input
+                                type="number"
+                                min="1"
+                                autoFocus
+                                value={editQtyInput}
+                                onChange={e => setEditQtyInput(e.target.value)}
+                                onKeyDown={handleEditKeyDown}
+                                className="w-full text-center text-3xl font-bold text-stone-800 border-b-2 border-amber-500 focus:outline-none mb-8 py-2 bg-transparent placeholder-stone-200"
+                                placeholder="0"
+                            />
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={() => {
+                                        setEditingProduction(null);
+                                        setEditQtyInput('');
+                                    }}
+                                    className="px-4 py-2 rounded-xl font-bold text-stone-500 hover:bg-stone-100 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleEditProduction}
+                                    className="px-4 py-2 rounded-xl font-bold bg-amber-600 text-white hover:bg-amber-700 shadow-lg hover:shadow-xl transition active:scale-95"
+                                >
+                                    Update
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Delete Confirmation Dialog */}
+            {deletingProduction && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+                        <div className="p-6">
+                            <div className="flex items-center justify-center w-12 h-12 bg-red-100 rounded-full mx-auto mb-4">
+                                <i className="fas fa-exclamation-triangle text-red-600 text-xl"></i>
+                            </div>
+                            <h3 className="text-lg font-bold text-stone-800 mb-2 text-center">Delete Production Entry?</h3>
+                            <p className="text-stone-500 text-sm mb-6 text-center">
+                                Are you sure you want to delete <span className="font-bold text-stone-700">{items.find(i => i.id === deletingProduction.itemId)?.name}</span> with quantity <span className="font-bold text-green-700">+{deletingProduction.quantity}</span>?
+                                <br />
+                                <span className="text-xs text-stone-400">This action cannot be undone.</span>
+                            </p>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    onClick={() => setDeletingProduction(null)}
+                                    className="px-4 py-2 rounded-xl font-bold text-stone-500 hover:bg-stone-100 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleDeleteProduction}
+                                    className="px-4 py-2 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 shadow-lg hover:shadow-xl transition active:scale-95"
+                                >
+                                    Delete
                                 </button>
                             </div>
                         </div>

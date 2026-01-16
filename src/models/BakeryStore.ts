@@ -584,6 +584,92 @@ export class BakeryStore {
         this.notify();
     }
 
+    async updateProduction(entryId: string, newQuantity: number) {
+        if (newQuantity <= 0) {
+            console.error('Production quantity must be greater than 0');
+            return;
+        }
+
+        this.shift.production = this.shift.production.map(p =>
+            p.id === entryId ? { ...p, quantity: newQuantity } : p
+        );
+
+        // Sync to Supabase - trigger will auto-update global_inventory
+        if (supabase) {
+            try {
+                await supabase.from('productions').update({
+                    quantity: newQuantity
+                }).eq('id', entryId);
+            } catch (error) {
+                console.error('Failed to update production in Supabase:', error);
+            }
+        }
+
+        this.notify();
+    }
+
+    async removeProduction(entryId: string) {
+        this.shift.production = this.shift.production.filter(p => p.id !== entryId);
+
+        // Sync to Supabase - trigger will auto-update global_inventory
+        if (supabase) {
+            try {
+                await supabase.from('productions').delete().eq('id', entryId);
+            } catch (error) {
+                console.error('Failed to delete production from Supabase:', error);
+            }
+        }
+
+        this.notify();
+    }
+
+    async setProductionQuantity(itemId: string, quantity: number) {
+        const otherProductions = this.shift.production.filter(p => p.itemId !== itemId);
+
+        // Delete existing productions for this item in Supabase
+        if (supabase) {
+            try {
+                await supabase.from('productions')
+                    .delete()
+                    .eq('shift_id', this.shift.id)
+                    .eq('item_id', itemId);
+            } catch (error) {
+                console.error('Failed to delete productions from Supabase:', error);
+            }
+        }
+
+        if (quantity > 0) {
+            const entryId = crypto.randomUUID();
+            const entry: ProductionEntry = {
+                id: entryId,
+                itemId,
+                quantity,
+                timestamp: Date.now()
+            };
+            this.shift.production = [...otherProductions, entry];
+
+            // Add new consolidated entry
+            if (supabase) {
+                try {
+                    await supabase.from('productions').insert({
+                        id: entryId,
+                        shift_id: this.shift.id,
+                        item_id: itemId,
+                        quantity,
+                        user_id: this.currentUser?.username || null,
+                        user_display_name: this.currentUser?.displayName || null,
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (error) {
+                    console.error('Failed to sync production to Supabase:', error);
+                }
+            }
+        } else {
+            this.shift.production = otherProductions;
+        }
+        this.notify();
+    }
+
     // ==================== SALES ACTIONS ====================
 
     async addSale(itemId: string, quantity: number) {

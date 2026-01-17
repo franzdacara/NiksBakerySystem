@@ -844,6 +844,21 @@ export class BakeryStore {
         this.notify();
     }
 
+    async deleteItem(itemId: string) {
+        this.items = this.items.filter(i => i.id !== itemId);
+
+        // Sync to Supabase
+        if (supabase) {
+            try {
+                await supabase.from('items').delete().eq('id', itemId);
+            } catch (error) {
+                console.error('Failed to delete item from Supabase:', error);
+            }
+        }
+
+        this.notify();
+    }
+
     async resetCatalog() {
         this.items = INITIAL_ITEMS;
 

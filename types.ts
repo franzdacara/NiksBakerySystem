@@ -14,7 +14,7 @@ export enum DischargeReason {
 export interface BakeryItem {
   id: string;
   name: string;
-  category: 'Bread' | 'Pastry' | 'Cake' | 'Beverage' | 'Coffee';
+  category: 'Bread' | 'Pastry' | 'Cake' | 'Beverage' | 'Coffee' | 'Ice Cream';
   unit: string;
   costPrice: number;
   sellingPrice: number;

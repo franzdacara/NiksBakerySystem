@@ -44,6 +44,20 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'reports', label: 'Shift Reports', icon: 'fa-file-alt' },
 ];
 
+const FullScreenMessage: React.FC<{ icon: string; title: string; text: string; spinner?: boolean; actions?: React.ReactNode }> = ({ icon, title, text, spinner, actions }) => (
+  <div className="min-h-screen flex items-center justify-center bg-[#fdfaf5] p-6">
+    <div className="w-full max-w-md text-center">
+      <div className="w-20 h-20 bg-amber-800 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg">
+        <i className={`fas ${icon} text-3xl text-amber-200`}></i>
+      </div>
+      <h1 className="text-2xl font-serif italic text-stone-800">{title}</h1>
+      <p className="text-stone-500 mt-2 break-words">{text}</p>
+      {spinner && <i className="fas fa-spinner fa-spin text-amber-700 text-xl mt-5"></i>}
+      {actions && <div className="flex flex-col sm:flex-row gap-3 justify-center mt-6">{actions}</div>}
+    </div>
+  </div>
+);
+
 const App: React.FC = () => {
   const store = useBakeryStore();
   const { isAuthenticated, shift, isAdmin, currentUser } = store;
@@ -57,8 +71,56 @@ const App: React.FC = () => {
     setMenuOpen(false);
   }, [isAuthenticated, isAdmin]);
 
+  // Everything shown comes from the database, so keep it fresh: when the tab/window is
+  // returned to, and every 30 seconds while it is open (also picks up shift status changes
+  // made on another device).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const refresh = () => { if (document.visibilityState === 'visible') void store.sync(); };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    const timer = setInterval(refresh, 30_000);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+      clearInterval(timer);
+    };
+  }, [store, isAuthenticated]);
+
+  // ...and every time a different page is opened
+  useEffect(() => {
+    if (isAuthenticated) void store.sync();
+  }, [store, isAuthenticated, activeTab]);
+
+  // Checking the saved login with the database
+  if (store.isInitializing) {
+    return <FullScreenMessage icon="fa-bread-slice" title="NiksBakerySystem" text="Starting up…" spinner />;
+  }
+
   if (!isAuthenticated) {
     return <Login store={store} />;
+  }
+
+  // Loading everything from the database after login
+  if (store.isLoading) {
+    return <FullScreenMessage icon="fa-bread-slice" title="Loading your data" text="Getting items, shift and stock from the database…" spinner />;
+  }
+
+  // The database could not be reached and there is nothing to show
+  if (store.loadError && store.items.length === 0) {
+    return (
+      <FullScreenMessage
+        icon="fa-triangle-exclamation"
+        title="Can't reach the database"
+        text={store.loadError}
+        actions={
+          <>
+            <button onClick={() => { store.isLoading = true; void store.loadFromSupabase(); }} className="h-12 px-6 rounded-xl bg-amber-800 text-white font-bold active:scale-95 transition">Try again</button>
+            <button onClick={() => store.logout()} className="h-12 px-6 rounded-xl bg-white border border-stone-200 text-stone-600 font-bold active:scale-95 transition">Log out</button>
+          </>
+        }
+      />
+    );
   }
 
   const visibleNav = NAV_ITEMS.filter(n => !n.adminOnly || isAdmin);
@@ -235,8 +297,27 @@ const App: React.FC = () => {
             <p className="text-stone-500 text-xs sm:text-sm md:text-base">
               {new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
             </p>
+            {store.lastSyncedAt && (
+              <p className={`text-[11px] mt-0.5 ${store.loadError ? 'text-red-500' : 'text-stone-400'}`}>
+                {store.loadError
+                  ? 'Can\'t reach the database - showing the last data received'
+                  : `Synced with database ${new Date(store.lastSyncedAt).toLocaleTimeString('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' })}`}
+              </p>
+            )}
           </div>
-          <div className="flex items-center space-x-3">{shiftButton}</div>
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <button
+              onClick={() => void store.sync()}
+              disabled={store.isSyncing}
+              aria-label="Refresh from database"
+              title="Refresh from database"
+              className={`relative h-10 w-10 sm:h-11 sm:w-11 flex-shrink-0 rounded-full bg-white border flex items-center justify-center text-stone-600 hover:bg-stone-100 active:scale-95 transition disabled:opacity-60 ${store.loadError ? 'border-red-300' : 'border-stone-200'}`}
+            >
+              <i className={`fas fa-rotate ${store.isSyncing ? 'fa-spin' : ''}`}></i>
+              {store.loadError && <span className="absolute top-0.5 right-0.5 w-2.5 h-2.5 rounded-full bg-red-500"></span>}
+            </button>
+            {shiftButton}
+          </div>
         </header>
 
         {/* Tab Views */}

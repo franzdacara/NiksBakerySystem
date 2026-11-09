@@ -120,6 +120,10 @@ NiksBakerySystem/
 
 Run `src/models/migrations/supabase_full_setup.sql` in the Supabase SQL Editor (edit the admin password on the first line first). It creates every table, the stock triggers and the `admin` login in one go. It is the only SQL file in the project and is safe to re-run. Users with role `admin` get the **Admin Dashboard** (all sales with graphs, remaining stock); everyone else is `staff` and lands on the Point of Sale.
 
+## Where data lives
+
+Everything is stored in Supabase: items, the current shift and its status, production, sales, discharges, ending-inventory counts, stock and login sessions. Each page re-reads the database when you open it, when you return to the tab, and every 30 seconds (there is also a refresh button in the header), so several devices stay in step. The browser keeps only one value, `niks_session_token` - a random id that points to your login session row in the database.
+
 ## Credits
 
 Developed by **Nikko Dacara**.

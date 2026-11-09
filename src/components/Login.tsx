@@ -25,7 +25,9 @@ export const Login: React.FC<LoginProps> = ({ store }) => {
             Swal.fire({
                 icon: 'error',
                 title: 'Login Failed',
-                text: 'Invalid username or password',
+                // loginError is set when the problem is the system (database unreachable, setup SQL
+                // not run) rather than a wrong username/password
+                text: store.loginError || 'Invalid username or password',
                 confirmButtonColor: '#92400e'
             });
         }

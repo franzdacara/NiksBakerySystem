@@ -92,36 +92,97 @@ CREATE TRIGGER trg_hash_user_password
 -- Hash any passwords that were saved as plain text before this ran.
 UPDATE users SET password = password WHERE password !~ '^\$2[aby]\$[0-9]{2}\$';
 
+-- ---- Login sessions live in the database -------------------------------
+-- Logging in creates a row here. The browser keeps ONLY the random token
+-- (so it knows which session is its own); who you are, your role and whether
+-- the session is still valid are all decided here. Logging out deletes the
+-- row, and deactivating a user (is_active = false) ends their session too.
+CREATE TABLE IF NOT EXISTS app_sessions (
+    token UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '30 days'
+);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user ON app_sessions(user_id);
+
 -- ---- Login check happens INSIDE the database --------------------------
 -- The browser sends the typed username + password to this function and gets
--- back only id / username / display name / role. It never receives (or can
--- read) any password or hash. Username matching ignores capital letters.
-CREATE OR REPLACE FUNCTION login_user(p_username TEXT, p_password TEXT)
-RETURNS TABLE (id UUID, username VARCHAR, display_name VARCHAR, role VARCHAR)
-LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
-    SELECT u.id, u.username, u.display_name, u.role
-      FROM users u
-     WHERE lower(u.username) = lower(btrim(p_username))
-       AND u.is_active
-       AND u.password = crypt(p_password, u.password)
+-- back only id / username / display name / role / session token. It never
+-- receives (or can read) any password or hash. Username matching ignores
+-- capital letters.
+DROP FUNCTION IF EXISTS login_user(TEXT, TEXT);
+CREATE FUNCTION login_user(p_username TEXT, p_password TEXT)
+RETURNS TABLE (id UUID, username VARCHAR, display_name VARCHAR, role VARCHAR, token UUID)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+#variable_conflict use_column
+DECLARE
+    u users%ROWTYPE;
+    new_token UUID;
+BEGIN
+    SELECT * INTO u
+      FROM users
+     WHERE lower(users.username) = lower(btrim(p_username))
+       AND users.is_active
+       AND users.password = crypt(p_password, users.password)
      LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    DELETE FROM app_sessions WHERE expires_at < NOW();   -- tidy up old sessions
+    INSERT INTO app_sessions (user_id) VALUES (u.id) RETURNING app_sessions.token INTO new_token;
+
+    RETURN QUERY SELECT u.id, u.username, u.display_name, u.role, new_token;
+END;
 $$;
 
--- Lock the users table away from the public key; only login_user() may touch it.
+-- Page reload: is this saved token still a valid session? Who is it?
+CREATE OR REPLACE FUNCTION resume_session(p_token UUID)
+RETURNS TABLE (id UUID, username VARCHAR, display_name VARCHAR, role VARCHAR)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, extensions AS $$
+#variable_conflict use_column
+BEGIN
+    UPDATE app_sessions SET last_seen = NOW() WHERE app_sessions.token = p_token AND expires_at > NOW();
+
+    RETURN QUERY
+        SELECT u.id, u.username, u.display_name, u.role
+          FROM app_sessions s
+          JOIN users u ON u.id = s.user_id
+         WHERE s.token = p_token
+           AND s.expires_at > NOW()
+           AND u.is_active;
+END;
+$$;
+
+-- Log out: delete the session.
+CREATE OR REPLACE FUNCTION logout_session(p_token UUID)
+RETURNS VOID
+LANGUAGE sql SECURITY DEFINER SET search_path = public, extensions AS $$
+    DELETE FROM app_sessions WHERE token = p_token;
+$$;
+
+-- Lock users + sessions away from the public key; only the functions above may touch them.
 -- (You still manage users in the dashboard Table Editor / SQL Editor.)
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         REVOKE ALL ON TABLE users FROM anon, authenticated;
+        REVOKE ALL ON TABLE app_sessions FROM anon, authenticated;
         REVOKE ALL ON FUNCTION login_user(TEXT, TEXT) FROM PUBLIC;
+        REVOKE ALL ON FUNCTION resume_session(UUID) FROM PUBLIC;
+        REVOKE ALL ON FUNCTION logout_session(UUID) FROM PUBLIC;
         GRANT EXECUTE ON FUNCTION login_user(TEXT, TEXT) TO anon, authenticated;
+        GRANT EXECUTE ON FUNCTION resume_session(UUID) TO anon, authenticated;
+        GRANT EXECUTE ON FUNCTION logout_session(UUID) TO anon, authenticated;
     END IF;
 END $$;
 
 -- ---- Starter accounts (passwords are hashed by the trigger above) ------
 INSERT INTO users (username, password, display_name, role) VALUES
-    ('nikkoStaff', 'password1Bakery', 'nikko', 'staff'),
-    ('nikkoAdmin', 'password2Bakery', 'nikko', 'admin')
+    ('nikkoStaff', '****', 'nikko', 'staff'),
+    ('nikkoAdmin', '****',, 'nikko', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
 -- Admin login. Re-running never overwrites an existing admin's password.
@@ -144,8 +205,14 @@ CREATE TABLE IF NOT EXISTS shifts (
     end_time TIMESTAMPTZ,
     opening_cash DECIMAL(10,2) DEFAULT 0,
     closing_cash DECIMAL(10,2),
+    inventory_start JSONB NOT NULL DEFAULT '{}'::jsonb,   -- stock counts when the shift began  {item_id: qty}
+    inventory_end   JSONB NOT NULL DEFAULT '{}'::jsonb,   -- verified ending counts            {item_id: qty}
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- (for databases whose shifts table was created before these columns existed)
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS inventory_start JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE shifts ADD COLUMN IF NOT EXISTS inventory_end   JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 -- Running stock - the source of truth for "stock remaining"
 CREATE TABLE IF NOT EXISTS global_inventory (
@@ -214,6 +281,7 @@ CREATE TABLE IF NOT EXISTS shift_reports (
 -- =====================================================================
 ALTER TABLE items            DISABLE ROW LEVEL SECURITY;
 ALTER TABLE users            DISABLE ROW LEVEL SECURITY;
+ALTER TABLE app_sessions     DISABLE ROW LEVEL SECURITY;
 ALTER TABLE shifts           DISABLE ROW LEVEL SECURITY;
 ALTER TABLE global_inventory DISABLE ROW LEVEL SECURITY;
 ALTER TABLE productions      DISABLE ROW LEVEL SECURITY;

@@ -42,7 +42,7 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
         lastFetchRef.current = Date.now();
         setRefreshing(true);
         try {
-            await Promise.all([store.refreshLiveData(), refreshStock()]);
+            await Promise.all([store.sync(), refreshStock()]);
         } finally {
             setRefreshing(false);
         }

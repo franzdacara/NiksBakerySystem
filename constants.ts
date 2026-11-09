@@ -2,7 +2,7 @@
 import { BakeryItem } from './types';
 
 // Note: User authentication is now handled via Supabase 'users' table
-// See supabase_users_table.sql for the table schema and initial user data
+// See src/models/migrations/supabase_full_setup.sql for the table schema and initial user data
 
 
 export const INITIAL_ITEMS: BakeryItem[] = [

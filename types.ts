@@ -4,6 +4,8 @@ export enum ShiftStatus {
   OPEN = 'OPEN',
 }
 
+export type UserRole = 'admin' | 'staff';
+
 export enum DischargeReason {
   EXPIRED = 'Expired',
   DAMAGED = 'Damaged',

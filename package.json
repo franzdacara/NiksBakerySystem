@@ -1,6 +1,7 @@
 {
   "name": "artisan-bakery-management-system",
   "private": true,
+  "author": "Nikko Dacara",
   "version": "0.0.0",
   "type": "module",
   "scripts": {

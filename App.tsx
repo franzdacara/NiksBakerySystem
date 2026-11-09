@@ -4,206 +4,250 @@ import { bakeryStore } from './src/models/BakeryStore';
 import { ShiftStatus } from './types';
 import { Login } from './src/components/Login';
 import { Dashboard } from './src/components/Dashboard';
+import { AdminDashboard } from './src/components/AdminDashboard';
 import { ProductionPanel } from './src/components/ProductionPanel';
 import { SalesPos } from './src/components/SalesPos';
 import { InventoryManager } from './src/components/InventoryManager';
 import { InventorySheet } from './src/components/InventorySheet';
 import { DischargePanel } from './src/components/DischargePanel';
 import { ShiftReportsPanel } from './src/components/ShiftReportsPanel';
+import { Credits } from './src/components/Credits';
 import { generateShiftReport } from './services/pdfReport';
 
 // Hook to subscribe to store updates
 const useBakeryStore = () => {
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   useEffect(() => {
     return bakeryStore.subscribe(() => setTick(t => t + 1));
   }, []);
   return bakeryStore;
 };
 
+type Tab = 'admin' | 'dashboard' | 'production' | 'sales' | 'inventory' | 'discharge' | 'sheet' | 'reports';
+
+interface NavItem {
+  key: Tab;
+  label: string;
+  icon: string;
+  adminOnly?: boolean;
+  danger?: boolean;
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { key: 'admin', label: 'Admin Dashboard', icon: 'fa-chart-pie', adminOnly: true },
+  { key: 'sales', label: 'Point of Sale', icon: 'fa-cash-register' },
+  { key: 'dashboard', label: 'Shift Overview', icon: 'fa-chart-line' },
+  { key: 'production', label: 'Production', icon: 'fa-mitten' },
+  { key: 'inventory', label: 'Items Library', icon: 'fa-boxes' },
+  { key: 'sheet', label: 'Inventory Sheet', icon: 'fa-clipboard-list' },
+  { key: 'discharge', label: 'BO / Discharge', icon: 'fa-trash-alt', danger: true },
+  { key: 'reports', label: 'Shift Reports', icon: 'fa-file-alt' },
+];
+
 const App: React.FC = () => {
   const store = useBakeryStore();
-  const { isAuthenticated, shift } = store;
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'production' | 'sales' | 'inventory' | 'discharge' | 'sheet' | 'reports'>('dashboard');
+  const { isAuthenticated, shift, isAdmin, currentUser } = store;
+  // Admins land on their dashboard, cashiers land straight on the POS
+  const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'admin' : 'sales');
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // When someone signs in (or out and a different role signs in), reset to their home tab
+  useEffect(() => {
+    if (isAuthenticated) setActiveTab(isAdmin ? 'admin' : 'sales');
+    setMenuOpen(false);
+  }, [isAuthenticated, isAdmin]);
 
   if (!isAuthenticated) {
     return <Login store={store} />;
   }
 
+  const visibleNav = NAV_ITEMS.filter(n => !n.adminOnly || isAdmin);
+  // Never render the admin view for non-admins, even if state was somehow set
+  const tab: Tab = activeTab === 'admin' && !isAdmin ? 'sales' : activeTab;
+  const title = NAV_ITEMS.find(n => n.key === tab)?.label ?? '';
+  const isOpen = shift.status === ShiftStatus.OPEN;
+
+  const goTo = (key: Tab) => {
+    setActiveTab(key);
+    setMenuOpen(false);
+  };
+
+  const shiftButton = isOpen ? (
+    <button
+      onClick={async () => {
+        if (tab === 'sheet') {
+          // Step 2: Already on sheet, verify and close
+          const result = await Swal.fire({
+            title: 'End Shift?',
+            text: 'Have you verified the ending inventory counts?',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#15803d',
+            cancelButtonColor: '#78716c',
+            confirmButtonText: 'Yes, End Shift',
+            cancelButtonText: 'Cancel'
+          });
+          if (result.isConfirmed) {
+            // Generate PDF report before ending shift
+            generateShiftReport(store);
+            store.endShift(0);
+            setActiveTab(isAdmin ? 'admin' : 'dashboard'); // Reset tab
+            Swal.fire({
+              icon: 'success',
+              title: 'Shift Ended',
+              text: 'PDF report has been downloaded',
+              confirmButtonColor: '#92400e'
+            });
+          }
+        } else {
+          // Step 1: Redirect to sheet and prefill
+          const result = await Swal.fire({
+            title: 'Verify Inventory',
+            text: 'Proceed to verify ending inventory?',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#92400e',
+            cancelButtonColor: '#78716c',
+            confirmButtonText: 'Yes, Proceed',
+            cancelButtonText: 'Cancel'
+          });
+          if (result.isConfirmed) {
+            store.prefillEndingInventory();
+            setActiveTab('sheet');
+            Swal.fire({
+              icon: 'info',
+              title: 'Inventory Pre-filled',
+              text: 'System has pre-filled ending inventory based on sales. Please verify counts and click End Shift again.',
+              confirmButtonColor: '#92400e'
+            });
+          }
+        }
+      }}
+      className={`${tab === 'sheet' ? 'bg-green-700 hover:bg-green-600' : 'bg-amber-800 hover:bg-amber-700'} text-white h-10 sm:h-11 px-4 sm:px-6 text-sm sm:text-base whitespace-nowrap rounded-full font-semibold transition-all shadow-md active:scale-95`}
+    >
+      {tab === 'sheet' ? 'Confirm End Shift' : 'End Shift'}
+    </button>
+  ) : (
+    <button
+      onClick={() => {
+        // Automatically start shift using previous ending inventory (or 0 for all items)
+        store.startShift();
+      }}
+      disabled={store.isStartingShift}
+      className="bg-green-700 hover:bg-green-600 text-white h-10 sm:h-11 px-4 sm:px-6 text-sm sm:text-base whitespace-nowrap rounded-full font-semibold transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+    >
+      {store.isStartingShift && <i className="fas fa-spinner fa-spin"></i>}
+      <span>{store.isStartingShift ? 'Starting Shift...' : 'Start New Shift'}</span>
+    </button>
+  );
+
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-[#fdfaf5]">
-      {/* Sidebar Navigation */}
-      <nav className="w-full md:w-64 bg-stone-900 text-white flex flex-col flex-shrink-0 relative">
-        <div className="p-6">
-          <h1 className="text-xl font-serif italic text-amber-200">NiksBakerySystem</h1>
-          <p className="text-stone-400 text-[10px] uppercase tracking-tighter mt-1 font-bold">Premium Management</p>
+    <div className="min-h-screen md:flex bg-[#fdfaf5]">
+      {/* ===== Mobile top bar ===== */}
+      <header className="md:hidden sticky top-0 z-30 flex items-center justify-between gap-3 bg-stone-900 text-white px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2">
+        <button
+          onClick={() => setMenuOpen(true)}
+          aria-label="Open menu"
+          className="w-11 h-11 rounded-xl flex items-center justify-center text-xl active:bg-stone-800"
+        >
+          <i className="fas fa-bars"></i>
+        </button>
+        <h1 className="flex-1 min-w-0 truncate text-lg font-serif italic text-amber-200">{title}</h1>
+        <span className="flex items-center gap-2 px-3 h-9 rounded-full bg-stone-800 text-xs font-semibold">
+          <span className={`w-2.5 h-2.5 rounded-full ${isOpen ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`}></span>
+          {isOpen ? 'Open' : 'Closed'}
+        </span>
+      </header>
+
+      {/* ===== Sidebar (drawer on phones, fixed column from tablet up) ===== */}
+      {menuOpen && <div className="md:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setMenuOpen(false)}></div>}
+      <nav
+        className={`fixed md:sticky inset-y-0 left-0 z-50 md:z-auto w-72 md:w-64 md:top-0 md:h-screen bg-stone-900 text-white flex flex-col flex-shrink-0 transition-transform duration-200 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
+        aria-label="Main navigation"
+      >
+        <div className="p-6 flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-serif italic text-amber-200">NiksBakerySystem</h1>
+            <p className="text-stone-400 text-[10px] uppercase tracking-tighter mt-1 font-bold">Premium Management</p>
+          </div>
+          <button
+            onClick={() => setMenuOpen(false)}
+            aria-label="Close menu"
+            className="md:hidden w-10 h-10 -mr-2 -mt-2 rounded-full text-stone-400 active:bg-stone-800 flex items-center justify-center"
+          >
+            <i className="fas fa-xmark text-lg"></i>
+          </button>
         </div>
 
-        <div className="flex-1 px-4 space-y-2">
-          <button
-            onClick={() => setActiveTab('dashboard')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'dashboard' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-chart-line w-5"></i>
-            <span>Dashboard</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('production')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'production' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-mitten w-5"></i>
-            <span>Production</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('sales')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'sales' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-cash-register w-5"></i>
-            <span>Sales Entry</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'inventory' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-boxes w-5"></i>
-            <span>Items Library</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('sheet')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'sheet' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-clipboard-list w-5"></i>
-            <span>Inventory Sheet</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('discharge')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'discharge' ? 'bg-red-700 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-trash-alt w-5"></i>
-            <span>BO / Discharge</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('reports')}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${activeTab === 'reports' ? 'bg-amber-800 text-white' : 'text-stone-400 hover:bg-stone-800'}`}
-          >
-            <i className="fas fa-file-alt w-5"></i>
-            <span>Shift Reports</span>
-          </button>
+        <div className="flex-1 px-4 space-y-1.5 overflow-y-auto">
+          {visibleNav.map(n => {
+            const active = tab === n.key;
+            return (
+              <button
+                key={n.key}
+                onClick={() => goTo(n.key)}
+                aria-current={active ? 'page' : undefined}
+                className={`w-full flex items-center space-x-3 px-4 h-12 rounded-lg transition ${active ? (n.danger ? 'bg-red-700' : 'bg-amber-800') + ' text-white' : 'text-stone-400 hover:bg-stone-800 active:bg-stone-800'}`}
+              >
+                <i className={`fas ${n.icon} w-5`}></i>
+                <span>{n.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="p-4 border-t border-stone-800 space-y-3">
+          {currentUser && (
+            <div className="flex items-center space-x-3 px-4 py-2 bg-stone-800 rounded-lg">
+              <div className="w-8 h-8 rounded-full bg-amber-800 flex items-center justify-center text-sm font-bold">
+                {currentUser.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold truncate">{currentUser.displayName}</p>
+                <p className="text-[10px] uppercase tracking-wider text-stone-400">{isAdmin ? 'Admin' : 'Staff'}</p>
+              </div>
+            </div>
+          )}
           <div className="flex items-center space-x-3 px-4 py-2 bg-stone-800 rounded-lg">
-            <div className={`w-3 h-3 rounded-full ${shift.status === ShiftStatus.OPEN ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${isOpen ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500'}`}></div>
             <span className="text-xs font-medium">Shift: {shift.status}</span>
           </div>
           <button
             onClick={() => store.logout()}
-            className="w-full flex items-center justify-center space-x-2 px-4 py-2 text-stone-500 hover:text-white transition group"
+            className="w-full flex items-center justify-center space-x-2 px-4 h-11 text-stone-400 hover:text-white transition group"
           >
             <i className="fas fa-sign-out-alt group-hover:translate-x-1 transition-transform"></i>
-            <span className="text-xs">Log Out</span>
+            <span className="text-sm">Log Out</span>
           </button>
         </div>
 
         {/* Sidebar Footer Credits */}
-        <div className="px-6 py-4 border-t border-stone-800 opacity-30">
-          <p className="text-xs text-stone-400">NiksBakerySystem &copy; 2024</p>
+        <div className="px-6 py-4 border-t border-stone-800 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <Credits tone="dark" />
         </div>
       </nav>
 
-      {/* Main Content Area */}
-      <main className="flex-1 h-screen overflow-y-auto p-4 md:p-8">
-        <header className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+      {/* ===== Main content ===== */}
+      <main className="flex-1 min-w-0 md:h-screen md:overflow-y-auto p-3 sm:p-5 md:p-8">
+        <header className="flex flex-row items-center justify-between mb-4 md:mb-8 gap-3 md:gap-4">
           <div>
-            <h2 className="text-3xl font-bold text-stone-800">
-              {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-            </h2>
-            <p className="text-stone-500">{new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <h2 className="hidden md:block text-3xl font-bold text-stone-800">{title}</h2>
+            <p className="text-stone-500 text-xs sm:text-sm md:text-base">
+              {new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
           </div>
-
-          <div className="flex items-center space-x-3">
-            {shift.status === ShiftStatus.CLOSED ? (
-              <button
-                onClick={() => {
-                  // Automatically start shift using previous ending inventory (or 0 for all items)
-                  store.startShift();
-                }}
-                disabled={store.isStartingShift}
-                className="bg-green-700 hover:bg-green-600 text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-              >
-                {store.isStartingShift && (
-                  <i className="fas fa-spinner fa-spin"></i>
-                )}
-                <span>{store.isStartingShift ? 'Starting Shift...' : 'Start New Shift'}</span>
-              </button>
-            ) : (
-              <button
-                onClick={async () => {
-                  if (activeTab === 'sheet') {
-                    // Step 2: Already on sheet, verify and close
-                    const result = await Swal.fire({
-                      title: 'End Shift?',
-                      text: 'Have you verified the ending inventory counts?',
-                      icon: 'question',
-                      showCancelButton: true,
-                      confirmButtonColor: '#15803d',
-                      cancelButtonColor: '#78716c',
-                      confirmButtonText: 'Yes, End Shift',
-                      cancelButtonText: 'Cancel'
-                    });
-                    if (result.isConfirmed) {
-                      // Generate PDF report before ending shift
-                      generateShiftReport(store);
-                      store.endShift(0);
-                      setActiveTab('dashboard'); // Reset tab
-                      Swal.fire({
-                        icon: 'success',
-                        title: 'Shift Ended',
-                        text: 'PDF report has been downloaded',
-                        confirmButtonColor: '#92400e'
-                      });
-                    }
-                  } else {
-                    // Step 1: Redirect to sheet and prefill
-                    const result = await Swal.fire({
-                      title: 'Verify Inventory',
-                      text: 'Proceed to verify ending inventory?',
-                      icon: 'question',
-                      showCancelButton: true,
-                      confirmButtonColor: '#92400e',
-                      cancelButtonColor: '#78716c',
-                      confirmButtonText: 'Yes, Proceed',
-                      cancelButtonText: 'Cancel'
-                    });
-                    if (result.isConfirmed) {
-                      store.prefillEndingInventory();
-                      setActiveTab('sheet');
-                      Swal.fire({
-                        icon: 'info',
-                        title: 'Inventory Pre-filled',
-                        text: 'System has pre-filled ending inventory based on sales. Please verify counts and click End Shift again.',
-                        confirmButtonColor: '#92400e'
-                      });
-                    }
-                  }
-                }}
-                className={`${activeTab === 'sheet' ? 'bg-green-700 hover:bg-green-600' : 'bg-amber-800 hover:bg-amber-700'} text-white px-6 py-2.5 rounded-full font-semibold transition-all shadow-md active:scale-95`}
-              >
-                {activeTab === 'sheet' ? 'Confirm End Shift' : 'End Shift'}
-              </button>
-            )}
-          </div>
+          <div className="flex items-center space-x-3">{shiftButton}</div>
         </header>
 
         {/* Tab Views */}
-        {activeTab === 'dashboard' && <Dashboard store={store} />}
-        {activeTab === 'production' && <ProductionPanel store={store} />}
-        {activeTab === 'sales' && <SalesPos store={store} />}
-        {activeTab === 'inventory' && <InventoryManager store={store} />}
-        {activeTab === 'sheet' && <InventorySheet store={store} />}
-        {activeTab === 'discharge' && <DischargePanel store={store} />}
-        {activeTab === 'reports' && <ShiftReportsPanel store={store} />}
-
+        {tab === 'admin' && <AdminDashboard store={store} />}
+        {tab === 'dashboard' && <Dashboard store={store} />}
+        {tab === 'production' && <ProductionPanel store={store} />}
+        {tab === 'sales' && <SalesPos store={store} />}
+        {tab === 'inventory' && <InventoryManager store={store} />}
+        {tab === 'sheet' && <InventorySheet store={store} />}
+        {tab === 'discharge' && <DischargePanel store={store} />}
+        {tab === 'reports' && <ShiftReportsPanel store={store} />}
       </main>
     </div>
   );

@@ -1,4 +1,4 @@
-import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry, DischargeEntry, DischargeReason } from '../../types';
+import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry, DischargeEntry, DischargeReason, UserRole } from '../../types';
 import { INITIAL_ITEMS } from '../../constants';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
@@ -57,12 +57,30 @@ interface DbDischarge {
     timestamp: string;
 }
 
-interface DbUser {
+/** What login_user() returns - deliberately has no password field */
+interface DbLoginUser {
     id: string;
     username: string;
-    password: string;
     display_name: string;
-    is_active: boolean;
+    role?: string | null; // 'admin' | 'staff'
+}
+
+/** One row of the sales table, normalised for reporting (all shifts, not just the open one) */
+export interface SaleRecord {
+    id: string;
+    shiftId: string;
+    itemId: string;
+    quantity: number;
+    /** Price captured at time of sale, when the database recorded it */
+    unitPrice: number | null;
+    timestamp: number;
+}
+
+export interface CurrentUser {
+    id: string;
+    username: string;
+    displayName: string;
+    role: UserRole;
 }
 
 interface DbGlobalInventory {
@@ -110,7 +128,7 @@ export class BakeryStore {
     items: BakeryItem[];
     shift: Shift;
     isAuthenticated: boolean;
-    currentUser: { id: string; username: string; displayName: string } | null = null;
+    currentUser: CurrentUser | null = null;
     isLoading: boolean = true;
     isStartingShift: boolean = false;
     private listeners: Set<Listener> = new Set();
@@ -143,7 +161,9 @@ export class BakeryStore {
 
         this.isAuthenticated = localStorage.getItem('is_authenticated') === 'true';
         const savedUser = localStorage.getItem('current_user');
-        this.currentUser = savedUser ? JSON.parse(savedUser) : null;
+        const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+        // Sessions saved before roles existed have no role -> treat as staff
+        this.currentUser = parsedUser ? { ...parsedUser, role: parsedUser.role === 'admin' ? 'admin' : 'staff' } : null;
 
         // Then sync with Supabase in background
         if (isSupabaseConfigured) {
@@ -329,12 +349,13 @@ export class BakeryStore {
         }
 
         try {
-            const { data: users, error } = await supabase
-                .from('users')
-                .select('id, username, password, display_name, is_active')
-                .eq('username', username.toLowerCase())
-                .eq('is_active', true)
-                .limit(1);
+            // The password is checked inside the database against a bcrypt hash (see
+            // login_user in supabase_full_setup.sql). The browser never receives a
+            // password or hash, only the matching user's id / name / role.
+            const { data: users, error } = await supabase.rpc('login_user', {
+                p_username: username,
+                p_password: password
+            });
 
             if (error) {
                 console.error('Login error:', error);
@@ -342,18 +363,17 @@ export class BakeryStore {
             }
 
             if (users && users.length > 0) {
-                const user = users[0] as DbUser;
-                if (user.password === password) {
-                    this.isAuthenticated = true;
-                    this.currentUser = {
-                        id: user.id,
-                        username: user.username,
-                        displayName: user.display_name
-                    };
-                    localStorage.setItem('current_user', JSON.stringify(this.currentUser));
-                    this.notify();
-                    return true;
-                }
+                const user = users[0] as DbLoginUser;
+                this.isAuthenticated = true;
+                this.currentUser = {
+                    id: user.id,
+                    username: user.username,
+                    displayName: user.display_name,
+                    role: user.role === 'admin' ? 'admin' : 'staff'
+                };
+                localStorage.setItem('current_user', JSON.stringify(this.currentUser));
+                this.notify();
+                return true;
             }
             return false;
         } catch (error) {
@@ -515,6 +535,100 @@ export class BakeryStore {
         }
 
         this.notify();
+    }
+
+    get isAdmin(): boolean {
+        return this.currentUser?.role === 'admin';
+    }
+
+    // ==================== REPORTING (admin dashboard) ====================
+
+    /** Current remaining stock per item, straight from global_inventory. Returns null if it can't be loaded. */
+    async fetchStockLevels(): Promise<Record<string, number> | null> {
+        if (!supabase) return null;
+        const { data, error } = await supabase.from('global_inventory').select('item_id, quantity');
+        if (error || !data) {
+            console.error('Failed to fetch stock levels:', error);
+            return null;
+        }
+        const stock: Record<string, number> = {};
+        data.forEach((row: DbGlobalInventory) => { stock[row.item_id] = row.quantity; });
+        return stock;
+    }
+
+    /**
+     * Lightweight refresh for the POS: re-reads item names/prices and this shift's
+     * sales (so sales rung up on another device show up). It deliberately does NOT
+     * touch the shift's beginning/ending inventory, unlike loadFromSupabase().
+     */
+    async refreshLiveData() {
+        if (!supabase) return;
+        try {
+            const [itemsRes, salesRes] = await Promise.all([
+                supabase.from('items').select('*').order('name'),
+                supabase.from('sales').select('*').eq('shift_id', this.shift.id),
+            ]);
+
+            if (!itemsRes.error && itemsRes.data && itemsRes.data.length > 0) {
+                this.items = itemsRes.data.map((item: DbItem) => ({
+                    id: item.id,
+                    name: item.name,
+                    category: item.category as BakeryItem['category'],
+                    unit: item.unit,
+                    costPrice: Number(item.cost_price),
+                    sellingPrice: Number(item.selling_price)
+                }));
+            }
+            if (!salesRes.error && salesRes.data) {
+                this.shift.sales = salesRes.data.map((s: DbSale) => ({
+                    id: s.id,
+                    itemId: s.item_id,
+                    quantity: s.quantity,
+                    timestamp: new Date(s.timestamp).getTime()
+                }));
+            }
+            this.notify();
+        } catch (error) {
+            console.error('Failed to refresh live data:', error);
+        }
+    }
+
+    /**
+     * Every sale across all shifts (newest first), optionally since a given time.
+     * Pages through results because Supabase returns at most 1000 rows per request.
+     */
+    async fetchSalesHistory(sinceMs?: number): Promise<SaleRecord[]> {
+        if (!supabase) return [];
+        const PAGE = 1000;
+        const MAX_PAGES = 30; // safety cap: 30k rows
+        const records: SaleRecord[] = [];
+
+        for (let page = 0; page < MAX_PAGES; page++) {
+            let query = supabase
+                .from('sales')
+                .select('*')
+                .order('timestamp', { ascending: false })
+                .range(page * PAGE, page * PAGE + PAGE - 1);
+            if (sinceMs !== undefined) query = query.gte('timestamp', new Date(sinceMs).toISOString());
+
+            const { data, error } = await query;
+            if (error) {
+                console.error('Failed to fetch sales history:', error);
+                throw error;
+            }
+            (data || []).forEach((s: DbSale & { unit_price?: number | null }) => {
+                records.push({
+                    id: s.id,
+                    shiftId: s.shift_id,
+                    itemId: s.item_id,
+                    quantity: s.quantity,
+                    unitPrice: s.unit_price !== null && s.unit_price !== undefined ? Number(s.unit_price) : null,
+                    timestamp: new Date(s.timestamp).getTime()
+                });
+            });
+            if (!data || data.length < PAGE) break;
+        }
+        return records;
     }
 
     // ==================== SHIFT REPORTS ====================

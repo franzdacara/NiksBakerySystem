@@ -280,7 +280,8 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ store }) => 
                     </div>
                 </div>
 
-                <table className="w-full text-left">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[34rem] text-left">
                     <thead className="bg-stone-100 border-b border-stone-200">
                         <tr>
                             <th className="px-6 py-4 text-xs font-bold text-stone-500 uppercase">Item Name</th>
@@ -327,6 +328,7 @@ export const InventoryManager: React.FC<InventoryManagerProps> = ({ store }) => 
                         )}
                     </tbody>
                 </table>
+                </div>
                 <div className="p-6 bg-stone-50 border-t border-stone-200 text-center">
                     <button
                         onClick={async () => {

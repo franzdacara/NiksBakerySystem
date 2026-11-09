@@ -116,6 +116,14 @@ NiksBakerySystem/
 └── package.json
 ```
 
+## Admin dashboard & roles
+
+Run `src/models/migrations/supabase_full_setup.sql` in the Supabase SQL Editor (edit the admin password on the first line first). It creates every table, the stock triggers and the `admin` login in one go. It is the only SQL file in the project and is safe to re-run. Users with role `admin` get the **Admin Dashboard** (all sales with graphs, remaining stock); everyone else is `staff` and lands on the Point of Sale.
+
+## Credits
+
+Developed by **Nikko Dacara**.
+
 ## License
 
 Private project for Nik's Bakery.

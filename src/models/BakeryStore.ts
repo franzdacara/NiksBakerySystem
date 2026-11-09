@@ -950,6 +950,30 @@ export class BakeryStore {
         await this.write('item removal', () => supabase!.from('items').delete().eq('id', itemId));
     }
 
+    /**
+     * How much history is tied to an item, across ALL shifts (not just the open one).
+     * Deleting an item also deletes this history in the database, so the Items Library
+     * uses this to refuse deleting items that have any. Throws if it can't be checked.
+     */
+    async getItemUsage(itemId: string): Promise<{ sales: number; production: number; discharges: number; stock: number }> {
+        if (!supabase) return { sales: 0, production: 0, discharges: 0, stock: 0 };
+        const db = supabase;
+        const count = async (table: string) => {
+            const { count, error } = await db.from(table).select('item_id', { count: 'exact', head: true }).eq('item_id', itemId);
+            if (error) throw error;
+            return count ?? 0;
+        };
+        const [sales, production, discharges, stockRes] = await Promise.all([
+            count('sales'),
+            count('productions'),
+            count('discharges'),
+            db.from('global_inventory').select('quantity').eq('item_id', itemId),
+        ]);
+        if (stockRes.error) throw stockRes.error;
+        const stock = (stockRes.data || []).reduce((a: number, r: { quantity: number }) => a + r.quantity, 0);
+        return { sales, production, discharges, stock };
+    }
+
     async resetCatalog() {
         // Fresh ids: the database uses UUIDs, which the short ids in constants.ts are not
         const fresh: BakeryItem[] = INITIAL_ITEMS.map(item => ({ ...item, id: crypto.randomUUID() }));
@@ -1010,6 +1034,22 @@ export class BakeryStore {
             this.endingTimer = null;
             this.pendingWrites--;
         }
+    }
+
+    // ==================== END-OF-SHIFT STATE (derived from the database) ====================
+
+    /**
+     * True once the person has pressed End Shift and the ending counts have been created
+     * (prefilled and saved on the shift row). Because the counts live in the database, this
+     * stays true across reloads and on other devices.
+     */
+    get endShiftStarted(): boolean {
+        return this.shift.status === ShiftStatus.OPEN && Object.keys(this.shift.inventoryEnd).length > 0;
+    }
+
+    /** The Daily Inventory Sheet is locked while a shift is open and End Shift has not been started. */
+    get inventorySheetLocked(): boolean {
+        return this.shift.status === ShiftStatus.OPEN && !this.endShiftStarted;
     }
 
     // ==================== COMPUTED VALUES ====================

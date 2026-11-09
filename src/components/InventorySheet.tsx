@@ -25,6 +25,24 @@ export const InventorySheet: React.FC<InventorySheetProps> = ({ store }) => {
         .filter(row => categoryFilter === 'all' || row.item.category === categoryFilter)
         .filter(row => row.item.name.toLowerCase().includes(search.toLowerCase()));
 
+    // While a shift is open and End Shift hasn't been pressed, the sheet is locked
+    if (store.inventorySheetLocked) {
+        return (
+            <div className="animate-in slide-in-from-bottom-4 duration-500">
+                <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8 sm:p-12 text-center">
+                    <div className="w-16 h-16 rounded-full bg-stone-100 text-stone-400 flex items-center justify-center mx-auto mb-4">
+                        <i className="fas fa-lock text-2xl"></i>
+                    </div>
+                    <h3 className="text-lg font-bold text-stone-800">Daily Inventory Sheet is locked</h3>
+                    <p className="text-stone-500 mt-2 max-w-md mx-auto">
+                        The sheet opens when you end the shift. Press <span className="font-bold text-stone-700">End Shift</span> at the
+                        top of the page, then review the ending counts and confirm.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="animate-in slide-in-from-bottom-4 duration-500">
             <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">

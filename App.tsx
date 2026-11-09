@@ -128,6 +128,9 @@ const App: React.FC = () => {
   const tab: Tab = activeTab === 'admin' && !isAdmin ? 'sales' : activeTab;
   const title = NAV_ITEMS.find(n => n.key === tab)?.label ?? '';
   const isOpen = shift.status === ShiftStatus.OPEN;
+  // The Daily Inventory Sheet stays locked until End Shift is pressed (see store.inventorySheetLocked)
+  const sheetLocked = store.inventorySheetLocked;
+  const onSheet = tab === 'sheet' && !sheetLocked;
 
   const goTo = (key: Tab) => {
     setActiveTab(key);
@@ -137,7 +140,7 @@ const App: React.FC = () => {
   const shiftButton = isOpen ? (
     <button
       onClick={async () => {
-        if (tab === 'sheet') {
+        if (onSheet) {
           // Step 2: Already on sheet, verify and close
           const result = await Swal.fire({
             title: 'End Shift?',
@@ -161,8 +164,12 @@ const App: React.FC = () => {
               confirmButtonColor: '#92400e'
             });
           }
+        } else if (store.endShiftStarted) {
+          // Counts are already being verified (e.g. the page was reloaded): carry on
+          // without pre-filling again, which would overwrite what was typed.
+          setActiveTab('sheet');
         } else {
-          // Step 1: Redirect to sheet and prefill
+          // Step 1: Redirect to sheet and prefill (this also unlocks the Inventory Sheet)
           const result = await Swal.fire({
             title: 'Verify Inventory',
             text: 'Proceed to verify ending inventory?',
@@ -185,9 +192,9 @@ const App: React.FC = () => {
           }
         }
       }}
-      className={`${tab === 'sheet' ? 'bg-green-700 hover:bg-green-600' : 'bg-amber-800 hover:bg-amber-700'} text-white h-10 sm:h-11 px-4 sm:px-6 text-sm sm:text-base whitespace-nowrap rounded-full font-semibold transition-all shadow-md active:scale-95`}
+      className={`${onSheet ? 'bg-green-700 hover:bg-green-600' : 'bg-amber-800 hover:bg-amber-700'} text-white h-10 sm:h-11 px-4 sm:px-6 text-sm sm:text-base whitespace-nowrap rounded-full font-semibold transition-all shadow-md active:scale-95`}
     >
-      {tab === 'sheet' ? 'Confirm End Shift' : 'End Shift'}
+      {onSheet ? 'Confirm End Shift' : 'End Shift'}
     </button>
   ) : (
     <button
@@ -244,15 +251,19 @@ const App: React.FC = () => {
         <div className="flex-1 px-4 space-y-1.5 overflow-y-auto">
           {visibleNav.map(n => {
             const active = tab === n.key;
+            const locked = n.key === 'sheet' && sheetLocked;
             return (
               <button
                 key={n.key}
                 onClick={() => goTo(n.key)}
+                disabled={locked}
+                title={locked ? 'Locked until you press End Shift' : undefined}
                 aria-current={active ? 'page' : undefined}
-                className={`w-full flex items-center space-x-3 px-4 h-12 rounded-lg transition ${active ? (n.danger ? 'bg-red-700' : 'bg-amber-800') + ' text-white' : 'text-stone-400 hover:bg-stone-800 active:bg-stone-800'}`}
+                className={`w-full flex items-center space-x-3 px-4 h-12 rounded-lg transition ${locked ? 'text-stone-600 opacity-60 cursor-not-allowed' : active ? (n.danger ? 'bg-red-700' : 'bg-amber-800') + ' text-white' : 'text-stone-400 hover:bg-stone-800 active:bg-stone-800'}`}
               >
                 <i className={`fas ${n.icon} w-5`}></i>
-                <span>{n.label}</span>
+                <span className="flex-1 text-left">{n.label}</span>
+                {locked && <i className="fas fa-lock text-xs"></i>}
               </button>
             );
           })}

@@ -365,7 +365,7 @@ const App: React.FC = () => {
         {tab === 'admin' && <AdminDashboard store={store} />}
         {tab === 'dashboard' && <Dashboard store={store} />}
         {tab === 'production' && <ProductionPanel store={store} />}
-        {tab === 'sales' && <SalesPos store={store} />}
+        {tab === 'sales' && <SalesPos store={store} sidebarHidden={sidebarHidden} />}
         {tab === 'inventory' && <InventoryManager store={store} />}
         {tab === 'sheet' && <InventorySheet store={store} />}
         {tab === 'discharge' && <DischargePanel store={store} />}

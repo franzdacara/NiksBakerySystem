@@ -7,13 +7,16 @@ import { peso, CATEGORY_ICONS, LOW_STOCK } from '../lib/format';
 
 interface SalesPosProps {
     store: BakeryStore;
+    /** The app sidebar is hidden (tablet/desktop), so the bottom order bar can use the full width */
+    sidebarHidden?: boolean;
 }
 
 /** Ready-made quantities shown in the quantity picker */
 const PRESET_QTYS = [1, 2, 3, 4, 5, 6, 10, 12];
+const IN_STOCK_ONLY_KEY = 'niks_counter_in_stock_only';
 type Picker = { item: BakeryItem; mode: 'cart' | 'shift' } | null;
 
-export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
+export const SalesPos: React.FC<SalesPosProps> = ({ store, sidebarHidden = false }) => {
     const [, forceUpdate] = useState(0);
     const [globalStock, setGlobalStock] = useState<Record<string, number>>({});
     const [stockReady, setStockReady] = useState(!supabase);
@@ -82,6 +85,16 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
     // ---- UI state ----
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState<string>('all');
+    // Hide sold-out products from the grid. Remembered on this device.
+    const [inStockOnly, setInStockOnly] = useState(() => {
+        try { return localStorage.getItem(IN_STOCK_ONLY_KEY) === '1'; } catch { return false; }
+    });
+    const toggleInStockOnly = () => {
+        setInStockOnly(on => {
+            try { localStorage.setItem(IN_STOCK_ONLY_KEY, on ? '0' : '1'); } catch { /* storage blocked: just not remembered */ }
+            return !on;
+        });
+    };
     const [cart, setCart] = useState<Record<string, number>>({});
     const [panelTab, setPanelTab] = useState<'order' | 'shift'>('order');
     const [drawerOpen, setDrawerOpen] = useState(false); // phone/tablet order drawer
@@ -110,6 +123,15 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
         const bo = shift.discharges.filter(d => d.itemId === itemId).reduce((a, d) => a + d.quantity, 0);
         return Math.max(0, beg + prod - sold - bo);
     };
+
+    /** What the grid shows. With "In stock only" on, sold-out products are left out; products
+     *  still loading their stock, or already in the order, stay so nothing disappears mid-sale. */
+    const visibleItems = inStockOnly
+        ? filteredItems.filter(i => {
+            const avail = getAvailable(i.id);
+            return avail === null || avail > 0 || (cart[i.id] || 0) > 0;
+        })
+        : filteredItems;
 
     // ---- shift (already recorded) sales, aggregated per item ----
     const shiftSales = useMemo(() => items
@@ -524,6 +546,19 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
                         )}
                     </div>
                     <div className="flex gap-2 overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        <button
+                            onClick={toggleInStockOnly}
+                            role="switch"
+                            aria-checked={inStockOnly}
+                            title={inStockOnly ? 'Showing only products with stock' : 'Hide out-of-stock products'}
+                            className={`flex-shrink-0 h-10 px-4 rounded-full text-sm font-bold transition active:scale-95 flex items-center gap-2 ${inStockOnly
+                                ? 'bg-green-700 text-white shadow'
+                                : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'}`}
+                        >
+                            <i className={`fas ${inStockOnly ? 'fa-circle-check' : 'fa-filter'}`}></i>
+                            In stock only
+                        </button>
+                        <span className="flex-shrink-0 w-px h-6 self-center bg-stone-200" aria-hidden="true"></span>
                         {categories.map(cat => (
                             <button
                                 key={cat}
@@ -559,7 +594,7 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
 
                 <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4">
                     <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
-                        {filteredItems.map(item => {
+                        {visibleItems.map(item => {
                             const avail = getAvailable(item.id);
                             const outOfStock = avail !== null && avail <= 0;
                             const inCart = cart[item.id] || 0;
@@ -589,8 +624,10 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
                             );
                         })}
                     </div>
-                    {filteredItems.length === 0 && (
-                        <EmptyState icon="fa-magnifying-glass" title="No products found" hint="Try a different search or category." />
+                    {visibleItems.length === 0 && (
+                        filteredItems.length > 0
+                            ? <EmptyState icon="fa-box-open" title="Nothing in stock here" hint={'Turn off "In stock only" to see sold-out products.'} />
+                            : <EmptyState icon="fa-magnifying-glass" title="No products found" hint="Try a different search or category." />
                     )}
                 </div>
             </section>
@@ -602,7 +639,7 @@ export const SalesPos: React.FC<SalesPosProps> = ({ store }) => {
 
             {/* ============ Order bar + drawer (phone / tablet) ============ */}
             {!drawerOpen && (
-                <div className="lg:hidden fixed inset-x-0 md:left-64 bottom-0 z-30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#fdfaf5] via-[#fdfaf5]/95 to-transparent">
+                <div className={`lg:hidden fixed inset-x-0 ${sidebarHidden ? '' : 'md:left-64'} bottom-0 transition-[left] duration-300 ease-in-out motion-reduce:transition-none z-30 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-[#fdfaf5] via-[#fdfaf5]/95 to-transparent`}>
                     <button
                         onClick={() => setDrawerOpen(true)}
                         className="w-full h-16 rounded-2xl bg-stone-900 text-white shadow-xl flex items-center justify-between px-5 active:scale-[0.98] transition"

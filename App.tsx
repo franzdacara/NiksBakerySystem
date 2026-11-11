@@ -35,7 +35,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { key: 'admin', label: 'Admin Dashboard', icon: 'fa-chart-pie', adminOnly: true },
-  { key: 'sales', label: 'Point of Sale', icon: 'fa-cash-register' },
+  { key: 'sales', label: 'Counter', icon: 'fa-cash-register' },
   { key: 'dashboard', label: 'Shift Overview', icon: 'fa-chart-line' },
   { key: 'production', label: 'Production', icon: 'fa-mitten' },
   { key: 'inventory', label: 'Items Library', icon: 'fa-boxes' },
@@ -43,6 +43,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: 'discharge', label: 'BO / Discharge', icon: 'fa-trash-alt', danger: true },
   { key: 'reports', label: 'Shift Reports', icon: 'fa-file-alt' },
 ];
+
+const SIDEBAR_HIDDEN_KEY = 'niks_sidebar_hidden';
 
 const FullScreenMessage: React.FC<{ icon: string; title: string; text: string; spinner?: boolean; actions?: React.ReactNode }> = ({ icon, title, text, spinner, actions }) => (
   <div className="min-h-screen flex items-center justify-center bg-[#fdfaf5] p-6">
@@ -64,6 +66,17 @@ const App: React.FC = () => {
   // Admins land on their dashboard, cashiers land straight on the POS
   const [activeTab, setActiveTab] = useState<Tab>(isAdmin ? 'admin' : 'sales');
   const [menuOpen, setMenuOpen] = useState(false);
+  // Tablet/desktop only: the sidebar can be hidden to give the page the full width.
+  // Remembered on this device; phones keep using the slide-in drawer.
+  const [sidebarHidden, setSidebarHidden] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_HIDDEN_KEY) === '1'; } catch { return false; }
+  });
+  const toggleSidebar = () => {
+    setSidebarHidden(hidden => {
+      try { localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? '0' : '1'); } catch { /* storage blocked: just not remembered */ }
+      return !hidden;
+    });
+  };
 
   // When someone signs in (or out and a different role signs in), reset to their home tab
   useEffect(() => {
@@ -231,7 +244,7 @@ const App: React.FC = () => {
       {/* ===== Sidebar (drawer on phones, fixed column from tablet up) ===== */}
       {menuOpen && <div className="md:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setMenuOpen(false)}></div>}
       <nav
-        className={`fixed md:sticky inset-y-0 left-0 z-50 md:z-auto w-72 md:w-64 md:top-0 md:h-screen bg-stone-900 text-white flex flex-col flex-shrink-0 transition-transform duration-200 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
+        className={`fixed md:sticky inset-y-0 left-0 md:left-auto z-50 md:z-auto w-72 md:w-64 md:top-0 md:h-screen bg-stone-900 text-white flex flex-col flex-shrink-0 transition-[transform,margin,visibility] duration-300 ease-in-out motion-reduce:transition-none${menuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 ${sidebarHidden ? 'md:-ml-64 md:invisible' : ''}`}
         aria-label="Main navigation"
       >
         <div className="p-6 flex items-start justify-between">
@@ -245,6 +258,14 @@ const App: React.FC = () => {
             className="md:hidden w-10 h-10 -mr-2 -mt-2 rounded-full text-stone-400 active:bg-stone-800 flex items-center justify-center"
           >
             <i className="fas fa-xmark text-lg"></i>
+          </button>
+          <button
+            onClick={toggleSidebar}
+            aria-label="Hide sidebar"
+            title="Hide sidebar"
+            className="hidden md:flex w-9 h-9 -mr-2 -mt-1 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 active:bg-stone-800 items-center justify-center transition"
+          >
+            <i className="fas fa-bars"></i>
           </button>
         </div>
 
@@ -303,7 +324,16 @@ const App: React.FC = () => {
       {/* ===== Main content ===== */}
       <main className="flex-1 min-w-0 md:h-screen md:overflow-y-auto p-3 sm:p-5 md:p-8">
         <header className="flex flex-row items-center justify-between mb-4 md:mb-8 gap-3 md:gap-4">
-          <div>
+          {/* Always rendered so it can grow/fade in step with the sidebar sliding away */}
+          <button
+            onClick={toggleSidebar}
+            aria-label="Show sidebar"
+            title="Show sidebar"
+            className={`hidden md:flex h-11 flex-shrink-0 rounded-full bg-white border-stone-200 items-center justify-center text-stone-600 hover:bg-stone-100 active:scale-95 overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none ${sidebarHidden ? 'w-11 border opacity-100' : 'w-0 -mr-4 border-0 opacity-0 invisible pointer-events-none'}`}
+          >
+            <i className="fas fa-bars"></i>
+          </button>
+          <div className="flex-1 min-w-0">
             <h2 className="hidden md:block text-3xl font-bold text-stone-800">{title}</h2>
             <p className="text-stone-500 text-xs sm:text-sm md:text-base">
               {new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}

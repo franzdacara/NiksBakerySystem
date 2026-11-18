@@ -1,7 +1,7 @@
 import Swal from 'sweetalert2';
 import { BakeryItem, Shift, ShiftStatus, ProductionEntry, SaleEntry, DischargeEntry, DischargeReason, UserRole } from '../../types';
 import { INITIAL_ITEMS } from '../../constants';
-import { supabase } from '../lib/supabase';
+import { supabase, setSessionToken } from '../lib/supabase';
 
 /**
  * BakeryStore - the app's data layer.
@@ -208,6 +208,7 @@ export class BakeryStore {
                     console.error('Could not check saved login:', error);
                 } else if (data && data.length > 0) {
                     this.sessionToken = token;
+                    setSessionToken(token); // sent with every request so RLS lets it through
                     this.applyUser(data[0] as DbSessionUser);
                     this.isAuthenticated = true;
                     this.isLoading = true;
@@ -262,6 +263,7 @@ export class BakeryStore {
                     return false;
                 }
                 this.sessionToken = row.token;
+                setSessionToken(row.token);
                 saveToken(row.token);
                 this.applyUser(row);
                 this.isAuthenticated = true;
@@ -281,6 +283,7 @@ export class BakeryStore {
     logout() {
         const token = this.sessionToken;
         this.sessionToken = null;
+        setSessionToken(null);
         clearToken();
 
         this.cancelEndingTimer();

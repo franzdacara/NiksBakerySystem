@@ -15,6 +15,24 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Then RESTART the dev server (Ctrl+C, npm run dev)');
 }
 
+// Row Level Security is ON for every table. Because the app uses its own login
+// instead of Supabase Auth, every request carries the app session token in this
+// header, and the database policies (section 4 of supabase_full_setup.sql) only
+// let a request through when the token belongs to a live session. Without it,
+// someone holding just the public anon key gets nothing.
+export const SESSION_HEADER = 'x-session-token';
+let sessionToken: string | null = null;
+
+/** Called by the store on login / session resume (token) and logout (null). */
+export const setSessionToken = (token: string | null) => { sessionToken = token; };
+
+const fetchWithSession: typeof fetch = (input, init) => {
+    if (!sessionToken) return fetch(input, init);
+    const headers = new Headers(init?.headers);
+    headers.set(SESSION_HEADER, sessionToken);
+    return fetch(input, { ...init, headers });
+};
+
 // This app has its own login (the login_user() database function) and never uses
 // Supabase Auth sessions. Turning the auth machinery off stops supabase-js from
 // grabbing a browser lock ("Navigator LockManager lock ... immediately failed"),
@@ -26,6 +44,7 @@ export const supabase = supabaseUrl && supabaseAnonKey
             autoRefreshToken: false,
             detectSessionInUrl: false,
         },
+        global: { fetch: fetchWithSession },
     })
     : null;
 

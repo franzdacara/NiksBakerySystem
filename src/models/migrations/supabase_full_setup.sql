@@ -182,7 +182,7 @@ END $$;
 -- ---- Starter accounts (passwords are hashed by the trigger above) ------
 INSERT INTO users (username, password, display_name, role) VALUES
     ('nikkoStaff', '****', 'nikko', 'staff'),
-    ('nikkoAdmin', '****',, 'nikko', 'admin')
+    ('nikkoAdmin', '****', 'nikko', 'admin')
 ON CONFLICT (username) DO NOTHING;
 
 -- Admin login. Re-running never overwrites an existing admin's password.
@@ -274,20 +274,91 @@ CREATE TABLE IF NOT EXISTS shift_reports (
 
 
 -- =====================================================================
--- 4. ROW LEVEL SECURITY OFF
---    The app uses the public (anon) key and has no row-level policies,
---    so RLS must be off or every read returns nothing.
---    (Do NOT click Supabase's "Automatically enable RLS" banner.)
+-- 4. ROW LEVEL SECURITY - ON for every table
+--    The public (anon) key is visible to anyone who opens the site, so it
+--    must not be enough to read or change data on its own.
+--
+--    The app signs in with login_user() above, not Supabase Auth, so after
+--    login the browser sends its session token in an "x-session-token"
+--    header on every request (src/lib/supabase.ts). Each policy below lets
+--    a request through only when that token belongs to a live session of an
+--    active user. No token / expired / logged out / deactivated -> no rows.
+--
+--    users and app_sessions get RLS with NO policies: nobody can reach them
+--    through the API; only the login functions above (SECURITY DEFINER) can.
 -- =====================================================================
-ALTER TABLE items            DISABLE ROW LEVEL SECURITY;
-ALTER TABLE users            DISABLE ROW LEVEL SECURITY;
-ALTER TABLE app_sessions     DISABLE ROW LEVEL SECURITY;
-ALTER TABLE shifts           DISABLE ROW LEVEL SECURITY;
-ALTER TABLE global_inventory DISABLE ROW LEVEL SECURITY;
-ALTER TABLE productions      DISABLE ROW LEVEL SECURITY;
-ALTER TABLE sales            DISABLE ROW LEVEL SECURITY;
-ALTER TABLE discharges       DISABLE ROW LEVEL SECURITY;
-ALTER TABLE shift_reports    DISABLE ROW LEVEL SECURITY;
+
+-- Lives outside "public" so the API can't call it directly; policies can.
+CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE OR REPLACE FUNCTION private.has_valid_session() RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    raw TEXT := NULLIF(current_setting('request.headers', true), '')::json ->> 'x-session-token';
+BEGIN
+    IF raw IS NULL OR raw !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RETURN FALSE;
+    END IF;
+    RETURN EXISTS (
+        SELECT 1
+          FROM app_sessions s
+          JOIN users u ON u.id = s.user_id
+         WHERE s.token = raw::uuid
+           AND s.expires_at > NOW()
+           AND u.is_active
+    );
+END;
+$$;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        REVOKE ALL ON FUNCTION private.has_valid_session() FROM PUBLIC;
+        GRANT USAGE ON SCHEMA private TO anon, authenticated;
+        GRANT EXECUTE ON FUNCTION private.has_valid_session() TO anon, authenticated;
+    END IF;
+END $$;
+
+ALTER TABLE items            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users            ENABLE ROW LEVEL SECURITY;   -- no policies: API locked out
+ALTER TABLE app_sessions     ENABLE ROW LEVEL SECURITY;   -- no policies: API locked out
+ALTER TABLE shifts           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE global_inventory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE productions      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE discharges       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shift_reports    ENABLE ROW LEVEL SECURITY;
+
+-- Staff and admin both use every screen (incl. Items Library), so any
+-- signed-in session gets full access. "(SELECT ...)" makes Postgres check
+-- the session once per request instead of once per row.
+DROP POLICY IF EXISTS "Signed-in app users" ON items;
+CREATE POLICY "Signed-in app users" ON items FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON shifts;
+CREATE POLICY "Signed-in app users" ON shifts FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON global_inventory;
+CREATE POLICY "Signed-in app users" ON global_inventory FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON productions;
+CREATE POLICY "Signed-in app users" ON productions FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON sales;
+CREATE POLICY "Signed-in app users" ON sales FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON discharges;
+CREATE POLICY "Signed-in app users" ON discharges FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
+
+DROP POLICY IF EXISTS "Signed-in app users" ON shift_reports;
+CREATE POLICY "Signed-in app users" ON shift_reports FOR ALL
+    USING ((SELECT private.has_valid_session())) WITH CHECK ((SELECT private.has_valid_session()));
 
 
 -- =====================================================================
@@ -315,7 +386,7 @@ BEGIN
             SET quantity = GREATEST(0, global_inventory.quantity + p_delta), updated_at = NOW();
     END IF;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Production: stock goes UP by the quantity
 CREATE OR REPLACE FUNCTION trg_production_inventory() RETURNS TRIGGER AS $$
@@ -333,7 +404,7 @@ BEGIN
     END IF;
     RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Sales and discharges: stock goes DOWN by the quantity
 CREATE OR REPLACE FUNCTION trg_outflow_inventory() RETURNS TRIGGER AS $$
@@ -350,7 +421,7 @@ BEGIN
     END IF;
     RETURN COALESCE(NEW, OLD);
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Remove the old insert-only triggers if an earlier setup created them
 DROP TRIGGER IF EXISTS trigger_production_update_inventory ON productions;
